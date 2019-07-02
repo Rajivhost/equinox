@@ -305,7 +305,7 @@ module Log =
             let logPeriodicRate name count ru = log.Information("rp{name} {count:n0} = ~{ru:n0} RU", name, count, ru)
             for uom, f in measures do let d = f duration in if d <> 0. then logPeriodicRate uom (float totalCount/d |> int64) (totalRc/d) 
 
-open Microsoft.Azure.Documents
+open Microsoft.Azure.Cosmos
 
 [<AutoOpen>]
 module private DocDb =
@@ -320,28 +320,20 @@ module private DocDb =
     /// DocumentDB Error HttpStatusCode extractor
     let (|DocDbException|_|) (e : exn) =
         match e with
-        | AggregateException (:? DocumentClientException as dce) -> Some dce
+        | AggregateException (:? CosmosException as ce) -> Some ce
         | _ -> None
-    /// Map Nullable to Option
-    let (|HasValue|Null|) (x:Nullable<_>) =
-        if x.HasValue then HasValue x.Value
-        else Null
     /// DocumentDB Error HttpStatusCode extractor
-    let (|DocDbStatusCode|_|) (e : DocumentClientException) =
-        match e.StatusCode with
-        | HasValue x -> Some x
-        | Null -> None
-
+    let (|DocDbStatusCode|) (e : CosmosException) =
+        e.StatusCode
     type ReadResult<'T> = Found of 'T | NotFound | NotModified
-    type DocDbCollection(client : Client.DocumentClient, collectionUri) =
-        member __.TryReadDocument(documentId : string, ?options : Client.RequestOptions): Async<float * ReadResult<'T>> = async {
+    type DocDbCollection(inner : Microsoft.Azure.Cosmos.Container) =
+        member __.TryReadDocument(documentId : string, ?options : ItemRequestOptions): Async<float * ReadResult<'T>> = async {
             let options = defaultArg options null
-            let docLink = sprintf "%O/docs/%s" collectionUri documentId
             let! ct = Async.CancellationToken
-            try let! document = async { return! client.ReadDocumentAsync<'T>(docLink, options = options, cancellationToken = ct) |> Async.AwaitTaskCorrect }
-                if document.StatusCode = System.Net.HttpStatusCode.NotModified then return document.RequestCharge, NotModified
+            try let! doc = async { return! inner.ReadItemAsync(documentId, PartitionKey.None, requestOptions = options, cancellationToken = ct) |> Async.AwaitTaskCorrect }
+                if doc.StatusCode = System.Net.HttpStatusCode.NotModified then return doc.RequestCharge, NotModified
                 // NB `.Document` will NRE if a IfNoneModified precondition triggers a NotModified result
-                else return document.RequestCharge, Found document.Document
+                else return doc.RequestCharge, Found doc.Resource
             with DocDbException (DocDbStatusCode System.Net.HttpStatusCode.NotFound as e) -> return e.RequestCharge, NotFound
                 // NB while the docs suggest you may see a 412, the NotModified in the body of the try/with is actually what happens
                 | DocDbException (DocDbStatusCode System.Net.HttpStatusCode.PreconditionFailed as e) -> return e.RequestCharge, NotModified }
@@ -416,16 +408,15 @@ function sync(req, expectedVersion, maxEvents) {
         | Conflict of Position * events: IIndexedEvent[]
         | ConflictUnknown of Position
 
-    let private run (client: Client.DocumentClient) (stream: CollectionStream) (expectedVersion: int64 option, req: Tip, maxEvents: int)
+    let private run (container: Container) (stream: CollectionStream) (expectedVersion: int64 option, req: Tip, maxEvents: int)
         : Async<float*Result> = async {
-        let sprocLink = sprintf "%O/sprocs/%s" stream.collectionUri sprocName
-        let opts = Client.RequestOptions(PartitionKey=PartitionKey(stream.name))
         let ev = match expectedVersion with Some ev -> Position.fromI ev | None -> Position.fromAppendAtEnd
         let! ct = Async.CancellationToken
-        let! (res : Client.StoredProcedureResponse<SyncResponse>) =
-            client.ExecuteStoredProcedureAsync(sprocLink, opts, ct, box req, box ev.index, box maxEvents) |> Async.AwaitTaskCorrect
-        let newPos = { index = res.Response.n; etag = Option.ofObj res.Response.etag }
-        return res.RequestCharge, res.Response.conflicts |> function
+        let args = [| req, box ev.index, box maxEvents|]
+        let! (res : Scripts.StoredProcedureExecuteResponse<SyncResponse>) =
+            container.Scripts.ExecuteStoredProcedureAsync<_,SyncResponse>(sprocName, args, PartitionKey(stream.name), cancellationToken = ct) |> Async.AwaitTaskCorrect
+        let newPos = { index = res.Resource.n; etag = Option.ofObj res.Resource.etag }
+        return res.RequestCharge, res.Resource.conflicts |> function
             | null -> Result.Written newPos
             | [||] when newPos.index = 0L -> Result.Conflict (newPos, Array.empty)
             | [||] -> Result.ConflictUnknown newPos
@@ -471,7 +462,7 @@ function sync(req, expectedVersion, maxEvents) {
         open System.Collections.ObjectModel
         open System.Linq
         type [<RequireQualifiedAccess>] Provisioning = Container of rus: int | Database of rus: int
-        let adjustOffer (client:Client.DocumentClient) resourceLink rus = async {
+        let adjustOffer (client:CosmosClient) resourceLink rus = async {
             let offer = client.CreateOfferQuery().Where(fun r -> r.ResourceLink = resourceLink).AsEnumerable().Single()
             let! _ = client.ReplaceOfferAsync(OfferV2(offer,rus)) |> Async.AwaitTaskCorrect in () }
         let private createDatabaseIfNotExists (client:Client.DocumentClient) dbName maybeRus =
@@ -540,7 +531,7 @@ function sync(req, expectedVersion, maxEvents) {
             return! createAuxCollectionIfNotExists client (dbName,collName) mode }
 
 module internal Tip =
-    let private get (client: Client.DocumentClient) (stream: CollectionStream, maybePos: Position option) =
+    let private get (client: CosmosClient) (stream: CollectionStream, maybePos: Position option) =
         let coll = DocDbCollection(client, stream.collectionUri)
         let ac = match maybePos with Some { etag=Some etag } -> Client.AccessCondition(Type=Client.AccessConditionType.IfNoneMatch, Condition=etag) | _ -> null
         let ro = Client.RequestOptions(PartitionKey=PartitionKey(stream.name), AccessCondition = ac)
