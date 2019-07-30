@@ -412,9 +412,9 @@ function sync(req, expectedVersion, maxEvents) {
         : Async<float*Result> = async {
         let ev = match expectedVersion with Some ev -> Position.fromI ev | None -> Position.fromAppendAtEnd
         let! ct = Async.CancellationToken
-        let args = [| req, box ev.index, box maxEvents|]
+        let args = [| box req; box ev.index; box maxEvents|]
         let! (res : Scripts.StoredProcedureExecuteResponse<SyncResponse>) =
-            stream.container.Scripts.ExecuteStoredProcedureAsync<_,SyncResponse>(sprocName, args, PartitionKey stream.name, cancellationToken = ct) |> Async.AwaitTaskCorrect
+            stream.container.Scripts.ExecuteStoredProcedureAsync<SyncResponse>(sprocName, PartitionKey stream.name, args, cancellationToken = ct) |> Async.AwaitTaskCorrect
         let newPos = { index = res.Resource.n; etag = Option.ofObj res.Resource.etag }
         return res.RequestCharge, res.Resource.conflicts |> function
             | null -> Result.Written newPos
@@ -1048,10 +1048,8 @@ type Connector
     do if log = null then nullArg "log"
 
     let clientOptions =
-        let cp = CosmosClientOptions() // TODO verify this is the correct way to get the defaults
-        cp.MaxRetryAttemptsOnRateLimitedRequests <- Nullable maxRetryAttemptsOnThrottledRequests
-        cp.MaxRetryWaitTimeOnRateLimitedRequests <- Nullable <| TimeSpan.FromSeconds(float maxRetryWaitTimeInSeconds)
-        cp.RequestTimeout <- requestTimeout
+        let maxAttempts, maxWait, timeout = Nullable maxRetryAttemptsOnThrottledRequests, (Nullable << TimeSpan.FromSeconds << float) maxRetryWaitTimeInSeconds, requestTimeout
+        let cp = CosmosClientOptions(MaxRetryAttemptsOnRateLimitedRequests = maxAttempts, MaxRetryWaitTimeOnRateLimitedRequests = maxWait, RequestTimeout = timeout)
         match mode with
         | Some ConnectionMode.Direct -> cp.ConnectionMode <- ConnectionMode.Direct
         | None | Some ConnectionMode.Gateway | Some _ (* enum total match :( *) -> cp.ConnectionMode <- ConnectionMode.Gateway // default; only supports Https
@@ -1072,7 +1070,8 @@ type Connector
             let sanitizedName = name.Replace('\'','_').Replace(':','_') // sic; Align with logging for ES Adapter
             let client = new CosmosClient(string uri, key, clientOptions)
             log.ForContext("Uri", uri).Information("CosmosDb Connection Name {connectionName}", sanitizedName)
-            // TODO figure out if there is a way to force a connect
+            // TODO validate this is equivalent to forcing a connect
+            let! _ = client.ReadAccountAsync() |> Async.AwaitTaskCorrect
             return client }
 
         match discovery with Discovery.UriAndKey(databaseUri=uri; key=key) -> connect (uri,key)
