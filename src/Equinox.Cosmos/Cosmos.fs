@@ -459,65 +459,60 @@ function sync(req, expectedVersion, maxEvents) {
         unfolds |> Seq.mapi (fun offset x -> { i = baseIndex + int64 offset; c = x.EventType; d = x.Data; m = x.Meta } : Unfold)
 
     module Initialization =
-        open System.Collections.ObjectModel
-        open System.Linq
         type [<RequireQualifiedAccess>] Provisioning = Container of rus: int | Database of rus: int
-        let adjustOffer (client:CosmosClient) resourceLink rus = async {
-            let offer = client.CreateOfferQuery().Where(fun r -> r.ResourceLink = resourceLink).AsEnumerable().Single()
-            let! _ = client.ReplaceOfferAsync(OfferV2(offer,rus)) |> Async.AwaitTaskCorrect in () }
-        let private createDatabaseIfNotExists (client:Client.DocumentClient) dbName maybeRus =
-            let opts = Client.RequestOptions(ConsistencyLevel = Nullable ConsistencyLevel.Session)
-            maybeRus |> Option.iter (fun rus -> opts.OfferThroughput <- Nullable rus)
-            client.CreateDatabaseIfNotExistsAsync(Database(Id=dbName), options = opts) |> Async.AwaitTaskCorrect
+        let adjustOfferC (c:Container) rus = async {
+            let! ct = Async.CancellationToken
+            let! _ = c.ReplaceThroughputAsync(rus, cancellationToken = ct) |> Async.AwaitTaskCorrect in () }
+        let adjustOfferD (d:Database) rus = async {
+            let! ct = Async.CancellationToken
+            let! _ = d.ReplaceThroughputAsync(rus, cancellationToken = ct) |> Async.AwaitTaskCorrect in () }
+        let private createDatabaseIfNotExists (client:CosmosClient) dbName maybeRus = async {
+            let! ct = Async.CancellationToken
+            let! _ = client.CreateDatabaseIfNotExistsAsync(id=dbName, throughput = Option.toNullable maybeRus, cancellationToken=ct) |> Async.AwaitTaskCorrect in () }
         let private createOrProvisionDatabase (client:CosmosClient) dbName mode = async {
             match mode with
             | Provisioning.Database rus ->
-                let! db = createDatabaseIfNotExists client dbName (Some rus)
-                return! adjustOffer client db.Resource.SelfLink rus
+                do! createDatabaseIfNotExists client dbName (Some rus)
+                return! adjustOfferD (client.GetDatabase dbName) rus
             | Provisioning.Container _ ->
                 let! _ = createDatabaseIfNotExists client dbName None in () }
-        let private createCollIfNotExists (client:CosmosClient) dbName (def: DocumentCollection) maybeRus =
-            let dbUri = Client.UriFactory.CreateDatabaseUri dbName
-            let opts = match maybeRus with None -> Client.RequestOptions() | Some rus -> Client.RequestOptions(OfferThroughput=Nullable rus)
-            client.CreateDocumentCollectionIfNotExistsAsync(dbUri, def, opts) |> Async.AwaitTaskCorrect
-        let private createOrProvisionCollection (client: CosmosClient) (dbName, def: DocumentCollection) mode = async {
+        let private createCollIfNotExists (d:Database) (cp:ContainerProperties) maybeRus = async {
+            let! ct = Async.CancellationToken
+            let! _ = d.CreateContainerIfNotExistsAsync(cp, throughput=Option.toNullable maybeRus, cancellationToken=ct) |> Async.AwaitTaskCorrect in () }
+        let private createOrProvisionCollection (d:Database) (cp:ContainerProperties) mode = async {
             match mode with
             | Provisioning.Database _ ->
-                let! _ = createCollIfNotExists client dbName def None in ()
+                do! createCollIfNotExists d cp None
             | Provisioning.Container rus ->
-                let! coll = createCollIfNotExists client dbName def (Some rus) in ()
-                return! adjustOffer client coll.Resource.SelfLink rus }
-        let private createStoredProcIfNotExists (client: IDocumentClient) (collectionUri: Uri) (name, body): Async<float> = async {
-            try let! r = client.CreateStoredProcedureAsync(collectionUri, StoredProcedure(Id = name, Body = body)) |> Async.AwaitTaskCorrect
+                do! createCollIfNotExists d cp (Some rus)
+                return! adjustOfferD d rus }
+        let private createStoredProcIfNotExists (c:Container) (name, body): Async<float> = async {
+            try let! r = c.Scripts.CreateStoredProcedureAsync(Scripts.StoredProcedureProperties(id=name, body=body)) |> Async.AwaitTaskCorrect
                 return r.RequestCharge
-            with DocDbException ((DocDbStatusCode sc) as e) when sc = System.Net.HttpStatusCode.Conflict -> return e.RequestCharge }
-        let private mkDocumentCollectection idFieldName partionKeyFieldName = 
-            // While the v2 SDK and earlier portal versions admitted 'fixed' collections where no Partition Key is defined, we follow the recent policy
-            // simplification of having a convention of always defining a partion key
-            let pkd = PartitionKeyDefinition()
-            pkd.Paths.Add(sprintf "/%s" partionKeyFieldName)
-            DocumentCollection(Id = idFieldName, PartitionKey = pkd)
+            with CosmosException ((CosmosStatusCode sc) as e) when sc = System.Net.HttpStatusCode.Conflict -> return e.RequestCharge }
+        let private mkContainerProperties collName partionKeyFieldName = 
+            ContainerProperties(id = collName, partitionKeyPath = sprintf "/%s" partionKeyFieldName)
         let private createBatchAndTipCollectionIfNotExists (client: CosmosClient) (dbName,collName) mode : Async<unit> =
-            let def = mkDocumentCollectection collName Batch.PartitionKeyField
+            let def = mkContainerProperties collName Batch.PartitionKeyField
             def.IndexingPolicy.IndexingMode <- IndexingMode.Consistent
             def.IndexingPolicy.Automatic <- true
             // Can either do a blacklist or a whitelist
             // Given how long and variable the blacklist would be, we whitelist instead
-            def.IndexingPolicy.ExcludedPaths <- Collection [|ExcludedPath(Path="/*")|]
+            def.IndexingPolicy.ExcludedPaths.Clear(); def.IndexingPolicy.ExcludedPaths.Add(ExcludedPath(Path="/*"))
             // NB its critical to index the nominated PartitionKey field defined above or there will be runtime errors
-            def.IndexingPolicy.IncludedPaths <- Collection [| for k in Batch.IndexedFields -> IncludedPath(Path=sprintf "/%s/?" k) |]
-            createOrProvisionCollection client (dbName, def) mode
+            def.IndexingPolicy.IncludedPaths.Clear(); for k in Batch.IndexedFields do def.IndexingPolicy.IncludedPaths.Add(IncludedPath(Path = sprintf "/%s/?" k))
+            createOrProvisionCollection (client.GetDatabase dbName) def mode
         let createSyncStoredProcIfNotExists (log: ILogger option) container = async {
             let! t, ru = createStoredProcIfNotExists container (sprocName,sprocBody) |> Stopwatch.Time
             match log with
             | None -> ()
             | Some log -> log.Information("Created stored procedure {sprocId} in {ms}ms rc={ru}", sprocName, (let e = t.Elapsed in e.TotalMilliseconds), ru) }
         let private createAuxCollectionIfNotExists (client: CosmosClient) (dbName,collName) mode : Async<unit> =
-            let def = mkDocumentCollectection collName "id" // while defining a partition key of "/id" is not strictly necessary, we follow the convention
+            let def = mkContainerProperties collName "id" // as per Cosmos team, Partition Key must be "/id"
             // TL;DR no indexing of any kind; see https://github.com/Azure/azure-documentdb-changefeedprocessor-dotnet/issues/142
             def.IndexingPolicy.Automatic <- false
             def.IndexingPolicy.IndexingMode <- IndexingMode.None
-            createOrProvisionCollection client (dbName,def) mode
+            createOrProvisionCollection (client.GetDatabase dbName) def mode
         let init log (client: CosmosClient) (dbName,collName) mode skipStoredProc = async {
             do! createOrProvisionDatabase client dbName mode
             do! createBatchAndTipCollectionIfNotExists client (dbName,collName) mode
@@ -1058,7 +1053,7 @@ type Connector
         | x -> cp.GatewayModeMaxConnectionLimit <- defaultArg x 1000
         cp
 
-    /// Yields an IDocumentClient configured and Connect()ed to a given DocDB collection per the requested `discovery` strategy
+    /// Yields an CosmosClient configured and Connect()ed to a given DocDB collection per the requested `discovery` strategy
     let connect
         (   /// Name should be sufficient to uniquely identify this connection within a single app instance's logs
             name,
