@@ -28,7 +28,7 @@ module Cosmos =
 
     type [<NoEquality; NoComparison>] Arguments =
         | [<AltCommandLine("-vs")>] VerboseStore
-        | [<AltCommandLine("-m")>] ConnectionMode of Equinox.Cosmos.ConnectionMode
+        | [<AltCommandLine("-m")>] ConnectionMode of Microsoft.Azure.Cosmos.ConnectionMode
         | [<AltCommandLine("-o")>] Timeout of float
         | [<AltCommandLine("-r")>] Retries of int
         | [<AltCommandLine("-rt")>] RetriesWaitTime of int
@@ -47,7 +47,7 @@ module Cosmos =
                 | Database _ ->         "specify a database name for Cosmos account (defaults: envvar:EQUINOX_COSMOS_DATABASE, test)."
                 | Collection _ ->       "specify a collection name for Cosmos account (defaults: envvar:EQUINOX_COSMOS_COLLECTION, test)."
     type Info(args : ParseResults<Arguments>) =
-        member __.Mode = args.GetResult(ConnectionMode,Equinox.Cosmos.ConnectionMode.DirectTcp)
+        member __.Mode = args.GetResult(ConnectionMode,Microsoft.Azure.Cosmos.ConnectionMode.Direct)
         member __.Connection =  match args.TryGetResult Connection  with Some x -> x | None -> envBackstop "Connection" "EQUINOX_COSMOS_CONNECTION"
         member __.Database =    match args.TryGetResult Database    with Some x -> x | None -> envBackstop "Database"   "EQUINOX_COSMOS_DATABASE"
         member __.Collection =  match args.TryGetResult Collection  with Some x -> x | None -> envBackstop "Collection" "EQUINOX_COSMOS_COLLECTION"
