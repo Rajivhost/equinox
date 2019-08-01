@@ -11,7 +11,7 @@ The `Unreleased` section name is replaced by the expected version of next releas
 ### Added
 ### Changed
 
-- now targets `Microsoft.Azure.Cosmos` v `3.1.0` (instead of `Microsoft.Azure.DocumentDB`[`.Core`] v 2.x)
+- now targets `Microsoft.Azure.Cosmos` v `3.1.0` (instead of `Microsoft.Azure.DocumentDB`[`.Core`] v 2.x) [#144](https://github.com/jet/equinox/pull/144)
 - `eqx project` now uses environment variables `PROPULSION_KAFKA_`* instead of `EQUINOX_`* [#143](https://github.com/jet/equinox/pull/143)
 
 ### Removed
