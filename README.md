@@ -81,7 +81,7 @@ Equinox does not focus on projection logic or wrapping thereof - each store brin
 
 Where it makes sense, raise GitHub issues for any questions so others can benefit from the discussion, or follow the links to [the DDD-CQRS-ES #equinox Slack channel](https://ddd-cqrs-es.slack.com/messages/CF5J67H6Z) above for quick discussions.
 
-This is an Open Source Project for many reasons, with some central goals:
+This is an Open Source project for many reasons, with some central goals:
 
 - quality reference code (the code should be clean and easy to read; where it makes sense, components can be grabbed and cloned locally and used in altered form)
 - optimal resilience and performance (getting performance right can add huge value for some systems)
