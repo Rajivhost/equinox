@@ -58,6 +58,10 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Tutorial", "samples\Tutoria
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.Tools.TestHarness", "tools\Equinox.Tools.TestHarness\Equinox.Tools.TestHarness.fsproj", "{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}"
 EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoDb", "src\Equinox.DynamoDb\Equinox.DynamoDb.fsproj", "{CEC07BE7-AF6D-476B-8695-A39C49E1015C}"
+EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoDb.Integration", "tests\Equinox.DynamoDb.Integration\Equinox.DynamoDb.Integration.fsproj", "{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -132,6 +136,14 @@ Global
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

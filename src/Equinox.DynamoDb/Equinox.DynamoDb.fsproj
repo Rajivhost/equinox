@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net461</TargetFrameworks>
+    <WarningLevel>5</WarningLevel>
+    <IsTestProject>false</IsTestProject>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <DisableImplicitSystemValueTupleReference>true</DisableImplicitSystemValueTupleReference>
+    <DefineConstants Condition=" '$(TargetFramework)' == 'net461' ">$(DefineConstants);NET461</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Equinox.MemoryStore\StoreHelpers.fs" Link="StoreHelpers.fs" />
+    <Compile Include="..\Equinox.EventStore\Infrastructure.fs" Link="Infrastructure.fs" />
+    <Compile Include="DynamoDb.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Equinox\Equinox.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.3.104.11" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
+    <PackageReference Include="MinVer" Version="2.0.0" PrivateAssets="All" />
+
+    <PackageReference Include="FSharp.Core" Version="3.1.2.5" Condition=" '$(TargetFramework)' != 'netstandard2.0' " />
+    <PackageReference Include="FSharp.Core" Version="4.3.4" Condition=" '$(TargetFramework)' == 'netstandard2.0' " />
+
+    <PackageReference Include="FsCodec.NewtonsoftJson" Version="1.0.0-rc2" />
+    <PackageReference Include="FSharp.Control.AsyncSeq" Version="2.0.22" />
+    <PackageReference Include="System.Runtime.Caching" Version="4.5.0" Condition=" '$(TargetFramework)' == 'netstandard2.0' " />
+    <Reference Include="System.Runtime.Caching" Condition=" '$(TargetFramework)' != 'netstandard2.0' " />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>
