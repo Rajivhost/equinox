@@ -1,13 +1,12 @@
 ﻿namespace Equinox.DynamoDb.Store
 
-open Equinox.Store
+open Amazon.DynamoDBv2.DataModel
+open Equinox.Core
+open FsCodec
 open Newtonsoft.Json
 open Serilog
 open System
 open System.IO
-open Amazon.DynamoDBv2.DataModel
-
-type IIndexedEvent = FsCodec.IIndexedEvent<byte[]>
 
 /// A single Domain Event from the array held in a Batch
 type [<NoEquality; NoComparison; JsonObject(ItemRequired=Required.Always)>]
@@ -26,13 +25,23 @@ type [<NoEquality; NoComparison; JsonObject(ItemRequired=Required.Always)>]
         /// Optional metadata, as UTF-8 encoded json, ready to emit directly (null, not written if missing)
         [<JsonConverter(typeof<FsCodec.NewtonsoftJson.VerbatimUtf8JsonConverter>)>]
         [<JsonProperty(Required=Required.Default, NullValueHandling=NullValueHandling.Ignore)>]
-        m: byte[] }  // optional
+        m: byte[]
 
-    interface FsCodec.IEvent<byte[]> with
+        /// Optional correlationId (can be null, not written if missing)
+        [<JsonProperty(Required=Required.Default, NullValueHandling=NullValueHandling.Ignore)>]
+        correlationId : string
+
+        /// Optional causationId (can be null, not written if missing)
+        [<JsonProperty(Required=Required.Default, NullValueHandling=NullValueHandling.Ignore)>]
+        causationId : string }
+
+    interface IEventData<byte[]> with
         member __.EventType = __.c
         member __.Data = __.d
         member __.Meta = __.m
         member __.Timestamp = __.t
+        member __.CorrelationId = __.correlationId
+        member __.CausationId = __.causationId
 
 /// A 'normal' (frozen, not Tip) Batch of Events (without any Unfolds)
 type [<NoEquality; NoComparison; JsonObject(ItemRequired=Required.Always)>]
@@ -61,7 +70,7 @@ type [<NoEquality; NoComparison; JsonObject(ItemRequired=Required.Always)>]
 
         /// The Domain Events (as opposed to Unfolded Events, see Tip) at this offset in the stream
         e: Event[] }
-    /// Unless running in single partion mode (which would restrict us to 10GB per collection)
+    /// Unless running in single partition mode (which would restrict us to 10GB per collection)
     /// we need to nominate a partition key that will be in every document
     static member internal PartitionKeyField = "p"
     /// As one cannot sort by the implicit `id` field, we have an indexed `i` field for sort and range query use
@@ -143,7 +152,6 @@ type [<NoEquality; NoComparison; JsonObject(ItemRequired=Required.Always)>]
 
         /// Compaction/Snapshot/Projection events - owned and managed by the sync stored proc
         u: Unfold[] }
-    /// arguably this should be a high nember to reflect fact it is the freshest ?
     static member internal WellKnownDocumentId = "-1"
 
 /// Position and Etag to which an operation is relative
@@ -159,7 +167,7 @@ module internal Position =
     let fromAppendAtEnd = fromI -1L // sic - needs to yield -1
     let fromEtag (value : string) = { fromI -2L with etag = Some value }
     /// NB very inefficient compared to FromDocument or using one already returned to you
-    let fromMaxIndex (xs: IIndexedEvent[]) =
+    let fromMaxIndex (xs: ITimelineEvent<byte[]>[]) =
         if Array.isEmpty xs then fromKnownEmpty
         else fromI (1L + Seq.max (seq { for x in xs -> x.Index }))
     /// Create Position from Tip record context (facilitating 1 RU reads)
@@ -173,9 +181,9 @@ module internal Position =
 type Direction = Forward | Backward override this.ToString() = match this with Forward -> "Forward" | Backward -> "Backward"
 
 type internal Enum() =
-    static member internal Events(b: Tip) : IIndexedEvent seq =
-        b.e |> Seq.mapi (fun offset x -> FsCodec.Core.IndexedEventData(b.i + int64 offset, false, x.c, x.d, x.m, x.t) :> _)
-    static member Events(i: int64, e: Event[], startPos : Position option, direction) : IIndexedEvent seq = seq {
+    static member internal Events(b: Tip) : ITimelineEvent<byte[]> seq =
+        b.e |> Seq.mapi (fun offset x -> FsCodec.Core.TimelineEvent.Create(b.i + int64 offset, x.c, x.d, x.m, x.correlationId, x.causationId, x.t) :> _)
+    static member Events(i: int64, e: Event[], startPos : Position option, direction) : ITimelineEvent<byte[]> seq = seq {
         // If we're loading from a nominated position, we need to discard items in the batch before/after the start on the start page
         let isValidGivenStartPos i =
             match startPos with
@@ -186,13 +194,13 @@ type internal Enum() =
             let index = i + int64 offset
             if isValidGivenStartPos index then
                 let x = e.[offset]
-                yield FsCodec.Core.IndexedEventData(index,false, x.c, x.d, x.m, x.t) :> _ }
+                yield FsCodec.Core.TimelineEvent.Create(index, x.c, x.d, x.m, x.correlationId, x.causationId, x.t) :> _ }
     static member internal Events(b: Batch, startPos, direction) =
         Enum.Events(b.i, b.e, startPos, direction)
         |> if direction = Direction.Backward then System.Linq.Enumerable.Reverse else id
-    static member Unfolds(xs: Unfold[]) : IIndexedEvent seq = seq {
-        for x in xs -> FsCodec.Core.IndexedEventData(x.i, true, x.c, x.d, x.m, DateTimeOffset.MinValue) }
-    static member EventsAndUnfolds(x: Tip): IIndexedEvent seq =
+    static member Unfolds(xs: Unfold[]) : ITimelineEvent<byte[]> seq = seq {
+        for x in xs -> FsCodec.Core.TimelineEvent.Create(x.i, x.c, x.d, x.m, null, null, DateTimeOffset.MinValue, isUnfold=true) }
+    static member EventsAndUnfolds(x: Tip): ITimelineEvent<byte[]> seq =
         Enum.Events x
         |> Seq.append (Enum.Unfolds x.u)
         // where Index is equal, unfolds get delivered after the events so the fold semantics can be 'idempotent'

@@ -1,8 +1,6 @@
-Jet 😍 F# and Event Sourcing; open sourcing Equinox has been a long journey; we're _nearly_ there! Please refer to the [FAQ](README.md#FAQ), [README.md](README.md) and the Issues for background info on what's outstanding. While the repo is open, this is **not released**, it's a soft-launched open source repo marked > 1.0 to reflect that its in production usage and thus can't undergo random rewrites, but it's still early days. There's absolutely an intention to make this be a proper open-source project; we're absolutely not making that claim right now; here are some excuses why:
+# Documentation
 
-- As noted in the [contributing section](README.md#contributing), we're simply not ready yet (we have governance models in place; this is purely a matter of conserving bandwidth, prioritising getting the system serviceable in terms of samples and documentation in advance of inviting people to evaluate)...
-- While [`dotnet new eqxweb -t`](https://github.com/jet/dotnet-templates) does provide the option to include a full-featured [TodoBackend](https://todobackend.com) per the spec, a more complete sample application is needed; see [#57](https://github.com/jet/equinox/issues/57)
-- There is a placeholder [Roadmap](#roadmap) for now, which is really an unordered backlog.
+Please refer to the [FAQ](README.md#FAQ), [README.md](README.md), the [Ideas](#ideas) and the [Issues](https://github.com/jet/equinox/issues) for background info on what's outstanding (aside from there being lots of room for more and better docs).
 
 # Background reading
 
@@ -39,9 +37,10 @@ Projection | Process whereby a Read Model tracks the State of Streams - lots of 
 Projector | Process tracking new Events, triggering Projection or Replication activities
 Query | Eventually Consistent read from a Read Model
 Synchronous Query | Consistent read direct from Stream State, breaking CQRS and coupling implementation to the Events used to support the Decision process
+Reactions | Work carried out as a Projection which drives ripple effects arising from an Event being Appended
 Read Model | Denormalized data maintained by a Projection for the purposes of providing a Read Model based on a Projection (honoring CQRS) See also Synchronous Query, Replication
 Replication | Emitting Events pretty much directly as they are written (to support an Aggregate's Decision process) with a view to having a consumer traverse them to derive a Read Model or drive some form of synchronization process; aka Database Integration - building a Read Model or exposing Rich Events is preferred
-Rich Events | Bulding a Projector that prepares a feed of events in the Bounded Context in a form that's not simply Replication (sometimes referred to a Enriching Events)
+Rich Events | Building a Projector that prepares a feed of events in the Bounded Context in a form that's not simply Replication (sometimes referred to a Enriching Events)
 State | Information inferred from a Stream as part of a Decision process (or Synchronous Query)
 Store | Holds a set of Streams
 Stream | Ordered sequence of Events in a Store
@@ -52,9 +51,9 @@ Term | Description
 -----|------------
 Change Feed | set of query patterns allowing one to run a continuous query reading Items (documents) in a Range in order of their last update
 Change Feed Processor | Library from Microsoft exposing facilities to Project from a Change Feed, maintaining Offsets per Physical Partition (Range) in the Lease Container
-Container | logical space in a CosmosDb holding [loosely] related Items (aka Documents). Items bear logical Partition Keys. Formerly aka Collection.
+Container | logical space in a CosmosDb holding [loosely] related Items (aka Documents). Items bear logical Partition Keys. Formerly Collection. Can be allocated Request Units.
 CosmosDb | Microsoft Azure's managed document database system
-Database | Group of Containers
+Database | Group of Containers. Can be allocated Request Units.
 DocumentDb | Original offering of CosmosDb, now entitled the SQL Query Model, `Microsoft.Azure.DocumentDb.Client[.Core]`
 Document id | Identifier used to load a document (Item) directly without a Query
 Lease Container | Container, outside of the storage Container (to avoid feedback effects) that maintains a set of Offsets per Range, together with leases reflecting instances of the Change Feed Processors and their Range assignments (aka `aux` container)
@@ -73,7 +72,7 @@ Term | Description
 -----|------------
 Category | Group of Streams bearing a common `CategoryName-<id>` stream name
 Event | json or blob representing an Event
-EventStore | [Open source](https://eventstore.org) Event Sourcing-optimized data store server and programming model with projection facilities
+EventStore | [Open source](https://eventstore.org) Event Sourcing-optimized data store server and programming model with powerful integrated projection facilities
 Stream | Core abstraction presented by the API
 WrongExpectedVersion | Low level exception thrown to communicate an Optimistic Concurrency Violation
 
@@ -81,7 +80,7 @@ WrongExpectedVersion | Low level exception thrown to communicate an Optimistic C
 
 Term | Description
 -----|------------
-Cache | `System.Net.MemoryCache` holding State and/or `etag` information for a Stream with a view to reducing roundtrips, latency and/or Request Charges
+Cache | `System.Net.MemoryCache` or equivalent holding _State_ and/or `etag` information for a Stream with a view to reducing roundtrips, latency and/or Request Charges
 Rolling Snapshot | Event written to an EventStore stream in order to ensure minimal roundtrips to EventStore when there is a Cache miss
 Unfolds | Snapshot information, represented as Events that are stored in an appropriate storage location (outside of a Stream's actual events) to minimize Queries and the attendant Request Charges when there is a Cache miss
 
@@ -92,21 +91,21 @@ NB this has lots of room for improvement, having started as a placeholder in [#5
 In F#, independent of the Store being used, the Equinox programming model involves (largely by convention, see [FAQ](README.md#FAQ)), per aggregation of events on a given category of stream:
 
 - `'state`: the rolling state maintained to enable Decisions or Queries to be made given a `'command` (not expected to be serializable or stored directly in a Store; can be held in a [.NET `MemoryCache`](https://docs.microsoft.com/en-us/dotnet/api/system.runtime.caching.memorycache))
-- `'event`: a discriminated union representing all the possible Events from which a state can be `evolve`d (see `e`vents and `u`nfolds in the [Storage Model](cosmos-storage-model)). Typically the mapping of the json to an `'event` `c`ase is [driven by a `UnionContractEncoder`](https://eiriktsarpalis.wordpress.com/2018/10/30/a-contract-pattern-for-schemaless-datastores/)
+- `'event`: a discriminated union representing all the possible Events from which a state can be `evolve`d (see `e`vents and `u`nfolds in the [Storage Model](#cosmos-storage-model)). Typically the mapping of the json to an `'event` `c`ase is [driven by a `UnionContractEncoder`](https://eiriktsarpalis.wordpress.com/2018/10/30/a-contract-pattern-for-schemaless-datastores/)
 
-- `initial: 'state`: the [implied] state of an empty stream
+- `initial: 'state`: the [implied] state of an empty stream. See also [Null Object Pattern](https://en.wikipedia.org/wiki/Null_object_pattern), [Identity element](https://en.wikipedia.org/wiki/Identity_element)
 
 - `fold : 'state -> 'event seq -> 'state`: function used to fold one or more loaded (or proposed) events (real ones and/or unfolded ones) into a given running [persistent data structure](https://en.wikipedia.org/wiki/Persistent_data_structure) of type `'state`
-- `evolve: state -> 'event -> 'state` - the `folder` function from which `fold` is built, representing the application of a single delta that the `'event` implies for the model to the `state`. _Note: `evolve` is an implementation detail of a given Aggregate; `fold` is the function used in tests and used to parameterize the Category's storage configuration._
+- `evolve: state -> 'event -> 'state` - the `folder` function from which `fold` is built, representing the application of a single delta that the `'event` implies for the model to the `state`. _Note: `evolve` is an implementation detail of a given Aggregate; `fold` is the function used in tests and used to parameterize the Category's storage configuration._. Sometimes named `apply`
 
-- `interpret: 'state -> 'command -> event' list`: responsible for _Deciding_ (in an [idempotent](https://en.wikipedia.org/wiki/Idempotence) manner) how the intention represented by a `command` should (given the provided `state`) be reflected in terms of a) the `events` that should be written to the stream to record the decision b) any response to be returned to the invoker (NB returning a result likely represents a violation of the [CQS](https://en.wikipedia.org/wiki/Command%E2%80%93query_separation) and/or CQRS principles, [see Synchronous Query in the Glossary](glossary))
+- `interpret: 'state -> 'command -> event' list`: responsible for _Deciding_ (in an [idempotent](https://en.wikipedia.org/wiki/Idempotence) manner) how the intention represented by a `command` should (given the provided `state`) be reflected in terms of a) the `events` that should be written to the stream to record the decision b) any response to be returned to the invoker (NB returning a result likely represents a violation of the [CQS](https://en.wikipedia.org/wiki/Command%E2%80%93query_separation) and/or CQRS principles, [see Synchronous Query in the Glossary](#glossary))
 
 When using a Store with support for synchronous unfolds and/or snapshots, one will typically implement two
 further functions in order to avoid having every `'event` in the stream be loaded and processed in order to
 build the `'state` per Decision or Query  (versus a single cheap point read from CosmosDb to read the _tip_):
 
 - `isOrigin: 'event -> bool`: predicate indicating whether a given `'event` is sufficient as a starting point i.e., provides sufficient information for the `evolve` function to yield a correct `state` without any preceding event being supplied to the `evolve`/`fold` functions
-- `unfold: 'state -> 'event seq`: function used to render events representing the `'state` which facilitate short circuiting the building of `state`, i.e., `isOrigin` should be able to yield `true` when presented with this `'event`. (in some cases, the store implementation will provide a custom `AccessStrategy` where the `unfold` function should only produce a single `event`; where this is the case, typically this is referred to as `compact : 'state -> 'event`).
+- `unfold: 'state -> 'event seq`: function used to render events representing the `'state` which facilitate short circuiting the building of `state`, i.e., `isOrigin` should be able to yield `true` when presented with this `'event`. (in some cases, the store implementation will provide a custom `AccessStrategy` where the `unfold` function should only produce a single `event`; where this is the case, typically this is referred to as `toSnapshot : 'state -> 'event`).
 
 ## Decision Flow
 
@@ -135,7 +134,8 @@ type Item = { id: int; name: string; added: DateTimeOffset }
 type Event =
     | Added of Item
     | Removed of itemId: int
-    | Compacted of items: Item[]
+    | Snapshotted of items: Item[]
+let (|ForClientId|) (id: ClientId) = Equinox.AggregateId("Favorites", ClientId.toStringN id)
 
 (* State types/helpers *)
 
@@ -145,7 +145,7 @@ let is id x = x.id = id
 (* Folding functions to build state from events *)
 
 let evolve state = function
-    | Compacted items -> List.ofArray items
+    | Snapshotted items -> List.ofArray items
     | Added item -> item :: state
     | Removed id -> state |> List.filter (is id)
 let fold state = Seq.fold evolve state
@@ -162,24 +162,23 @@ let interpret command state =
     | Add item -> if has item.id then [] else [Added item]
     | Remove id -> if has id then [Removed id] else []
 
-(* Optional: Unfold-related functions to allow establish state efficiently,
-   ideally without having to read/fold all Events in a Stream *)
+(* Optional: Snapshot/Unfold-related functions to allow establish state efficiently,
+   without having to read/fold all Events in a Stream *)
 
-let unfold state =
-    [Event.Compacted state]
-let isOrigin = function
-    | Compacted _ -> true
-    | _ -> false
+let toSnapshot state = [Event.Snapshotted (Array.ofList state)]
 
 (* The Service defines operations in business terms with minimal reference to Equinox terms
    or need to talk in terms of infrastructure; typically the service is stateless and can be a Singleton *)
 
-type Service(log, resolveStream, ?maxAttempts) =
-    let (|AggregateId|) (id: ClientId) = Equinox.AggregateId("Favorites", ClientId.toStringN id)
-    let (|Stream|) (AggregateId id) = Equinox.Stream(log, resolveStream id, defaultArg maxAttempts 3)
-    let execute (Stream stream) command : Async<unit> =
+type Service(log, resolve, ?maxAttempts) =
+
+    let resolve (Events.ForClientId streamId) = Equinox.Stream(log, resolve streamId, defaultArg maxAttempts 3)
+
+    let execute clientId command : Async<unit> =
+        let stream = resolve clientId
         stream.Transact(interpret command)
-    let read (Stream stream) : Async<string list> =
+    let read clientId : Async<string list> =
+        let stream = resolve clientId
         stream.Query id
 
     member __.Execute(clientId, command) =
@@ -205,7 +204,7 @@ The goal of [CQRS](https://martinfowler.com/bliki/CQRS.html) is to enable repres
 
 ## Applying Equinox in an Event-sourced architecture
 
-There are many tradeoffs to be considered along the journey from an initial proof of concept implementation to a working system and evolving that over time to a successful and maintainable model. There is no official magical combination of CQRS and ES that is always correct, so it’s important to look at the following information as a map of all the facilities available - it’s certainly not a checklist; not all achievements must be unlocked.
+There are many trade-offs to be considered along the journey from an initial proof of concept implementation to a working system and evolving that over time to a successful and maintainable model. There is no official magical combination of CQRS and ES that is always correct, so it’s important to look at the following information as a map of all the facilities available - it’s certainly not a checklist; not all achievements must be unlocked.
 
 At a high level we have:
 - _Aggregates_ - a set of information (Entities and Value Objects) within which Invariants need to be maintained, leading us us to logically group them in order to consider them when making a Decision
@@ -221,29 +220,31 @@ At a high level we have:
 
 In the code handling a given Aggregate’s Commands and Synchronous Queries, the code you write divide into:
 
-- Events (`codec`, `encode`, `tryDecode`, etc.)
-- State/Folds (`fold`, `evolve`)
-- Storage Model helpers (`isOrigin`,`unfold` etc)
+- Events (`codec`, `encode`, `tryDecode`, `category`, `(|For|)` etc.)
+- State/Fold (`evolve`, `fold`, `initial`)
+- Storage Model helpers (`isOrigin`,`unfold`,`toSnapshot` etc)
 
 while these are not omnipresent, for the purposes of this discussion we’ll treat them as that. See the [Programming Model](#programming-model) for a drilldown into these elements and their roles.
 
 ### Flows, Streams and Accumulators
 
-Equinox’s Command Handling consists of < 250 lines including interfaces and comments in https://github.com/jet/equinox/tree/master/src/Equinox - the elements you'll touch are in a normal application are:
+Equinox’s Command Handling consists of < 200 lines including interfaces and comments in https://github.com/jet/equinox/tree/master/src/Equinox - the elements you'll touch in a normal application are:
 
-- [`module Flow`](https://github.com/jet/equinox/blob/master/src/Equinox/Flow.fs#L36) - internal implementation of Optimistic Concurrency Control / retry loop used by `Stream`. It's recommended to at least scan this file as it defines the Transaction semantics everything is coming together in service of.
-- [`type Stream`](https://github.com/jet/equinox/blob/master/src/Equinox/Stream.fs#L11) - surface API one uses to `Transact` or `Query` against a specific stream
-- [`type Target` Discriminated Union](https://github.com/jet/equinox/blob/master/src/Equinox/Stream.fs#L39) - used to identify the Stream pertaining to the relevant Aggregate that `resolveStream` will use to hydrate a `Stream`
-- _[`type Accumulator`](https://github.com/jet/equinox/blob/master/src/Equinox/Accumulator.fs) - optional `type` that can be used to manage application-local State in some flavors of Service__
+- [`module Flow`](https://github.com/jet/equinox/blob/master/src/Equinox/Flow.fs#L34) - internal implementation of Optimistic Concurrency Control / retry loop used by `Stream`. It's recommended to at least scan this file as it defines the Transaction semantics everything is coming together in service of.
+- [`type Stream`](https://github.com/jet/equinox/blob/master/src/Equinox/Equinox.fs#L11) - surface API one uses to `Transact` or `Query` against a specific stream
+- [`type Target` Discriminated Union](https://github.com/jet/equinox/blob/master/src/Equinox/Equinox.fs#L42) - used to identify the Stream pertaining to the relevant Aggregate that `resolve` will use to hydrate a `Stream`
+- _[`type Accumulator`](https://github.com/jet/equinox/blob/master/src/Equinox/Accumulator.fs) - optional `type` that can be used to manage application-local State in extremely complex flavors of Service__
 
-Its recommended to read the examples in conjunction with perusing the code in order to see the relatively simple implementations that underlie the abstractions; the few hundred lines can tell many of the thousands of words about to follow!
+Its recommended to read the examples in conjunction with perusing the code in order to see the relatively simple implementations that underlie the abstractions; the 3 files can tell many of the thousands of words about to follow!
 
 #### Stream Members
 
 ```fsharp
 type Equinox.Stream(stream, log, maxAttempts) =
+
     // Run interpret function with present state, retrying with Optimistic Concurrency
     member __.Transact(interpret : State -> Event list) : Async<unit>
+
     // Run decide function with present state, retrying with Optimistic Concurrency, yielding Result on exit
     member __.Transact(decide : State -> Result*Event list) : Async<Result>
 
@@ -255,17 +256,18 @@ type Equinox.Stream(stream, log, maxAttempts) =
 
 ```fsharp
 type Accumulator(fold, originState) =
+
     // Events proposed thus far
     member Accumulated : Event list
 
     // Effective State including `Accumulated`
     member State : State
 
-    // Execute a normal command, stashing the Events in `Accumulated`
-    member Execute(interpret : State -> Event list) : unit
+    // Execute a normal Command-interpretation, stashing the Events in `Accumulated`
+    member Transact(interpret : State -> Event list) : unit
 
-    // Less frequently used variant of Execute that can additionally yield a result
-    member Decide(decide : State -> Result * Event list) : 'result
+    // Less frequently used variant that can additionally yield a result
+    member Transact(decide : State -> 'result * Event list) : 'result
 ```
 
 `Accumulator` is a small optional helper class that can be useful in certain scenarios where one is applying a sequence of Commands. One can use it within the body of a `decide` or `interpret` function as passed to `Stream.Transact`.
@@ -274,7 +276,7 @@ type Accumulator(fold, originState) =
 
 In this section, we’ll use possibly the simplest toy example: an unbounded list of items a user has favorited (starred) in an e-commerce system.
 
-See [samples/Tutorial/Favorites.fsx](samples/Tutorial/Favorites.fsx). It’s recommended to load this in Visual Studio and feed it into the F# Interactive REPL to observe it step by step. Here, we'll skip some steps and annotate some aspects with regard to tradeoffs that should be considered.
+See [samples/Tutorial/Favorites.fsx](samples/Tutorial/Favorites.fsx). It’s recommended to load this in Visual Studio and feed it into the F# Interactive REPL to observe it step by step. Here, we'll skip some steps and annotate some aspects with regard to trade-offs that should be considered.
 
 #### `Event`s + `initial`(+`evolve`)+`fold`
 
@@ -329,22 +331,25 @@ A final consideration to mention is that, even when correct idempotent handling 
 #### `Stream` usage
 
 ```fsharp
-type Service(log, stream, ?maxAttempts) =
-    let streamHandlerFor (clientId: string) =
+type Service(log, resolve, ?maxAttempts) =
+
+    let streamFor (clientId: string) =
         let aggregateId = Equinox.AggregateId("Favorites", clientId)
-        let stream = resolveStream aggregateId
+        let stream = resolve aggregateId
         Equinox.Stream(log, stream, defaultArg maxAttempts 3)
+
     let execute clientId command : Async<unit> =
         let stream = streamFor clientId
         stream.Transact(interpret command)
+
     let read clientId : Async<string list> =
         let stream = streamFor clientId
         inner.Query id
 ```
 
-The `Stream`-related functions in a given Aggregate establish the access patterns used across when Service methods access streams (see below). Typically these are relatively straightforward calls forwarding to a `Equinox.Stream` equivalent (see [`src/Equinox/Stream.fs`](src/Equinox/Stream.fs)), which in turn use the Optimistic Concurrency retry-loop  in [`src/Equinox/Flow.fs`](src/Equinox/Flow.fs).
+The `Stream`-related functions in a given Aggregate establish the access patterns used across when Service methods access streams (see below). Typically these are relatively straightforward calls forwarding to a `Equinox.Stream` equivalent (see [`src/Equinox/Equinox.fs`](src/Equinox/Equinox.fs)), which in turn use the Optimistic Concurrency retry-loop  in [`src/Equinox/Flow.fs`](src/Equinox/Flow.fs).
 
-`Read` above will do a roundtrip to the Store in order to fetch the most recent state (while this can be optimized by reading through the cache, each invocation will hit the store regardless). This Synchronous Read can be used to [Read-your-writes](https://en.wikipedia.org/wiki/Consistency_model#Read-your-writes_Consistency) to establish a state incorporating the effects of any Command invocation you know to have been completed.
+`Read` above will do a roundtrip to the Store in order to fetch the most recent state (in `AllowStale` mode, the store roundtrip can be optimized out by reading through the cache). This Synchronous Read can be used to [Read-your-writes](https://en.wikipedia.org/wiki/Consistency_model#Read-your-writes_Consistency) to establish a state incorporating the effects of any Command invocation you know to have been completed.
 
 `Execute` runs an Optimistic Concurrency Controlled `Transact` loop in order to effect the intent of the [write-only] Command. This involves:
 
@@ -356,7 +361,7 @@ e) after `maxAttempts` / `3` retries, a `MaxResyncAttemptsExceededException` is 
 
 Aside from reading the various documentation regarding the concepts underlying CQRS, it's important to consider that (unless you're trying to leverage the Read-your-writes guarantee), doing reads direct from an event-sourced store is generally not considered a best practice (the opposite, in fact). Any state you surface to a caller is by definition out of date the millisecond you obtain it, so in many cases a caller might as well use an eventually-consistent version of the same state obtained via a [n eventually-consistent] Projection (see terms above).
 
-All that said, if you're in a situation where your cache hit ratio is going to be high and/or you have reason to believe the underlying Event-Streams are not going to be long, pretty goof performance can be achieved nonetheless; just consider that taking this shortcut _will_ impede scaling and, at worst, can result in you ending up with a model that's potentially both:
+All that said, if you're in a situation where your cache hit ratio is going to be high and/or you have reason to believe the underlying Event-Streams are not going to be long, pretty good performance can be achieved nonetheless; just consider that taking this shortcut _will_ impede scaling and, at worst, can result in you ending up with a model that's potentially both:
 
 - overly simplistic - you're passing up the opportunity to provide a Read Model that directly models the requirement by providing a Materialized View
 - unnecessarily complex - the increased complexity of the `fold` function and/or any output from `unfold` (and its storage cost) is a drag on one's ability to read, test, extend and generally maintain the Command Handling/Decision logic that can only live on the write side
@@ -376,7 +381,7 @@ All that said, if you're in a situation where your cache hit ratio is going to b
 
 - while the Command pattern can help clarify a high level flow, there's no subsitute for representing actual business functions as well-named methods representing specific behaviors that are meaningful in the context of the application's Ubiquitous Language, can be documented and tested.
 
-- the `resolveStream` parameter affords one a sufficient [_seam_](http://www.informit.com/articles/article.aspx?p=359417) that facilitates testing independently with a mocked or stubbed Stream (without adding any references), or a `MemoryStore` (which does necessitate a reference to a separate Assembly for clarity) as desired. 
+- the `resolve` parameter affords one a sufficient [_seam_](http://www.informit.com/articles/article.aspx?p=359417) that facilitates testing independently with a mocked or stubbed Stream (without adding any references), or a `MemoryStore` (which does necessitate a reference to a separate Assembly for clarity) as desired. 
 
 ### Todo[Backend] walkthrough
 
@@ -392,18 +397,19 @@ type Event =
     | Deleted   of int
     | Cleared
     | Compacted of Todo[]
+let (|ForClientId|) (id : string) = Equinox.AggregateId("Todos", id)
 ```
 
-The fact that we have a `Cleared` Event stems from the fact that the spec defines such an operation. While one could implement this by emitting a `Deleted` event per currrently existing item, there many reasons to do model this as a first class event:-
+The fact that we have a `Cleared` Event stems from the fact that the spec defines such an operation. While one could implement this by emitting a `Deleted` event per currently existing item, there many reasons to do model this as a first class event:-
   i) Events should reflect user intent in its most direct form possible; if the user clicked Delete All, it's not the same to implement that as a set of individual deletes that happen to be united by having timestamp with a very low number of ms of each other.
-  ii) Because the `Cleared` Event establishes a known State, one can have the `isOrigin` flag the event as being the furthest one needs to search backwards before starting to `fold` events to establish the state. This also prevents the fact that the stream gets long in terms of numbers of events from impacting the effiency of the processing
-  iii) While having a `Cleared` event happens to work, it also represents a technical trick in a toy domain and should not be considered some cure-all Pattern - real Todo apps don't have a 'declare backruptcy' function. And example alternate approaches might be to represent each Todo list as it's own stream, and then have a `TodoLists` aggregate coordinating those.
+  ii) Because the `Cleared` Event establishes a known State, one can have the `isOrigin` flag the event as being the furthest one needs to search backwards before starting to `fold` events to establish the state. This also prevents the fact that the stream gets long in terms of numbers of events from impacting the efficiency of the processing
+  iii) While having a `Cleared` event happens to work, it also represents a technical trick in a toy domain and should not be considered some cure-all Pattern - real Todo apps don't have a 'declare bankruptcy' function. And example alternate approaches might be to represent each Todo list as it's own stream, and then have a `TodoLists` aggregate coordinating those.
 
 The `Compacted` event is used to represent Rolling Snapshots (stored in-stream) and/or Unfolds (stored in Tip document-Item); For a real Todo list, using this facility may well make sense - the State can fit in a reasonable space, and the likely number of Events may reach an interesting enough count to justify applying such a feature
   i) it should also be noted that Caching may be a better answer - note `Compacted` is also an `isOrigin` event - there's no need to go back any further if you meet one.
   ii) we use an Array in preference to a [F#] `list`; while there are `ListConverter`s out there (notably not in [`FsCodec`](https://github.com/jet/FsCodec)), in this case an Array is better from a GC and memory-efficiency stance, and does not need any special consideration when using `Newtonsoft.Json` to serialize.
 
-#### `State` + `initial`+`fold`
+#### `State` + `initial` + `evolve`/`fold`
 
 ```fsharp
 type State = { items : Todo list; nextId : int }
@@ -413,10 +419,10 @@ let evolve s = function
     | Updated value -> { s with items = s.items |> List.map (function { id = id } when id = value.id -> value | item -> item) }
     | Deleted id -> { s with items = s.items |> List.filter (fun x -> x.id <> id) }
     | Cleared -> { s with items = [] }
-    | Compacted items -> { s with items = List.ofArray items }
-let fold state = Seq.fold evolve state
+    | Snapshotted items -> { s with items = List.ofArray items }
+let fold : State -> Events.Event seq -> State = Seq.fold evolve
 let isOrigin = function Cleared | Compacted _ -> true | _ -> false
-let compact state = Compacted (Array.ofList state.items)
+let snapshot state = Snapshotted (Array.ofList state.items)
 ```
 
 - for `State` we use records and `list`s as the state needs to be a Persistent data structure.
@@ -444,18 +450,21 @@ let interpret c (state : State) =
 #### `Service`
 
 ```fsharp
-type Service(log, resolveStream, ?maxAttempts) =
-    let (|AggregateId|) (id : string) = Equinox.AggregateId("Todos", id)
-    let (|Stream|) (AggregateId id) = Equinox.Stream(log, resolveStream id, defaultArg maxAttempts 3)
+type Service(log, resolve, ?maxAttempts) =
 
-    let execute (Stream stream) command : Async<unit> =
+    let resolve (ForClientId streamId) = Equinox.Stream(log, resolve streamId, defaultArg maxAttempts 3)
+
+    let execute clientId command : Async<unit> =
+        let stream = reolve clientId
         stream.Transact(interpret command)
-    let handle (Stream stream) command : Async<Todo list> =
+    let handle clientId command : Async<Todo list> =
+        let stream = reolve clientId
         stream.Transact(fun state ->
             let ctx = Equinox.Context(fold, state)
             ctx.Execute (interpret command)
             ctx.State.items,ctx.Accumulated) // including any events just pended
-    let query (Stream stream) (projection : State -> T) : Async<T> =
+    let query clientId (projection : State -> T) : Async<T> =
+        let stream = reolve clientId
         stream.Query projection
 
     member __.List clientId : Async<Todo seq> =
@@ -473,10 +482,10 @@ type Service(log, resolveStream, ?maxAttempts) =
 ```
 
 - `handle` represents a command processing flow where we (idempotently) apply a command, but then also emit the state to the caller, as dictated by the needs of the call as specified in the TodoBackend spec. This uses the `Accumulator` helper type, which accumulates an `Event list`, and provides a way to compute the `state` incorporating the proposed events immediately.
-- While we could theoretically use Projections to service queries from an eventually consistent Read Model, this is not in aligment with the Read-you-writes expectation embodied in the tests (i.e. it would not pass the tests), and, more importantly, would not work correctly as a backend for the app. Because we have more than one query required, we make a generic `query` method, even though a specific `read` method (as in the Favorite example) might make sense to expose too
+- While we could theoretically use Projections to service queries from an eventually consistent Read Model, this is not in alignment with the Read-you-writes expectation embodied in the tests (i.e. it would not pass the tests), and, more importantly, would not work correctly as a backend for the app. Because we have more than one query required, we make a generic `query` method, even though a specific `read` method (as in the Favorite example) might make sense to expose too
 - The main conclusion to be drawn from the Favorites and TodoBackend `Service` implementations's use of `Stream` Methods is that, while there can be commonality in terms of the sorts of transactions one might encapsulate in this manner, there's also It Depends factors; for instance:
   i) the design doesnt provide complete idempotency and/or follow the CQRS style
-  ii) the fact that this is a toy system with lots of artificaial constraints and/or simplifications when compared to aspects that might present in a more complete implementation.
+  ii) the fact that this is a toy system with lots of artificial constraints and/or simplifications when compared to aspects that might present in a more complete implementation.
 - the `AggregateId` and `Stream` Active Patterns provide succinct ways to map an incoming `clientId` (which is not a `string` in the real implementation but instead an id using [`FSharp.UMX`](https://github.com/fsprojects/FSharp.UMX) in an unobtrusive manner.
 
 # Equinox Architectural Overview
@@ -503,7 +512,7 @@ However, given one has a specific store (or set of stores) in mind for the event
 
 ## Store-specific concerns mapping to the programming model
 
-This sections enumerates key concerns feeding into how Stores in general, and specific concrete Stores bind to the [Programming Model](programming-model):
+This section enumerates key concerns feeding into how Stores in general, and specific concrete Stores bind to the [Programming Model](#programming-model):
 
 ### EventStore
 
@@ -522,18 +531,18 @@ Key aspects relevant to the Equinox programming model:
 
 ### Azure CosmosDb concerns
 
-TL;DR caching can optimize RU consumption significantly. Due to the intrinsic ability to mutate easily, the potential to integrate rolling snapshots into core storage is clear. Providing ways to cache and snapshot matter a lot on CosmosDb, as lowest-common-demominator queries loading lots of events cost in performance and cash. The specifics of how you use the changefeed matters more than one might thing from the CosmosDb high level docs.
+TL;DR caching can optimize RU consumption significantly. Due to the intrinsic ability to mutate easily, the potential to integrate rolling snapshots into core storage is clear. Providing ways to cache and snapshot matter a lot on CosmosDb, as lowest-common-denominator queries loading lots of events cost in performance and cash. The specifics of how you use the changefeed matters more than one might thing from the CosmosDb high level docs.
 
-Overview: CosmosDb has been in production for >5 years and is a mature Document database. The initial DocumentDb offering is at this point a mere projected programming model atop a generic Document data store. Its changefeed mechanism affords a base upon which one can manage projections, but there is no directly provided mechanism that lends itself to building Projections that map directly to EventStore's facilties in this regard (i.e., there is nowhere to maintain consumer offsts in the store itself).
+Overview: CosmosDb has been in production for >5 years and is a mature Document database. The initial DocumentDb offering is at this point a mere projected programming model atop a generic Document data store. Its changefeed mechanism affords a base upon which one can manage projections, but there is no directly provided mechanism that lends itself to building Projections that map directly to EventStore's facilities in this regard (i.e., there is nowhere to maintain consumer offsets in the store itself).
 
 Key aspects relevant to the Equinox programming model:
 
-- CosmosDb has pervasive optimization feedback per call in the form of a Request Charge attached to each and every action. Working to optimize one's request charges per scenario is critical both in terms of the effect it has on the amount of Request Units/s one you need to preprovision (which translates directly to costs on your bill), and then live predictably within if one is not to be throttled with 429 responses. In general, the request charging structure can be considered a very strong mechanical sympathy feedback signal
+- CosmosDb has pervasive optimization feedback per call in the form of a Request Charge attached to each and every action. Working to optimize one's request charges per scenario is critical both in terms of the effect it has on the amount of Request Units/s one you need to pre-provision (which translates directly to costs on your bill), and then live predictably within if one is not to be throttled with 429 responses. In general, the request charging structure can be considered a very strong mechanical sympathy feedback signal
 - Point reads of single documents based on their identifier are charged as 1 RU plus a price per KB and are optimal. Queries, even ones returning that same single document, have significant overhead and hence are to be avoided
-- One key mechanism CosmosDb provides to allow one to work efficiently is that any point-read request where one supplies a valid `etag` is charged at 1 RU, regardless of the size one would be transferring in the case of a cache miss (the other key benefit of using this is that it avoids unecessarly clogging of the bandwidth, and optimal latencies due to no unnecessary data transfers)
+- One key mechanism CosmosDb provides to allow one to work efficiently is that any point-read request where one supplies a valid `etag` is charged at 1 RU, regardless of the size one would be transferring in the case of a cache miss (the other key benefit of using this is that it avoids unnecessarily clogging of the bandwidth, and optimal latencies due to no unnecessary data transfers)
 - Indexing things surfaces in terms of increased request charges; at scale, each indexing hence needs to be justified
 - Similarly to EventStore, the default ARS encoding CosmosDb provides, together with interoperability concerns, means that straight json makes sense as an encoding form for events (UTF-8 arrays)
-- Collectively, the above implies (arguably counterintuitively) that using the powerful generic querying facility that CosmosDb provides should actually be a last resort.
+- Collectively, the above implies (arguably counter-intuitively) that using the powerful generic querying facility that CosmosDb provides should actually be a last resort.
 - See [Cosmos Storage Model](#cosmos-storage-model) for further information on the specific encoding used, informed by these concerns.
 - Because reads, writes _and updates_ of items in the Tip document are charged based on the size of the item in units of 1KB, it's worth compressing and/or storing snapshots outside of the Tip-document (while those factors are also a concern with EventStore, the key difference is their direct effect of charges in this case).
 
@@ -543,7 +552,7 @@ The implications of how the changefeed mechanism works also have implications fo
 - Each update of a document can have the same effect in terms of Request Charges incurred in tracking the changefeed (each write results in a document "moving to the tail" in the consumption order - if multiple writes occur within a polling period, you'll only see the last one)
 - The ChangeFeedProcessor presents a programming model which needs to maintain a position. Typically one should store that in an auxiliary collection in order to avoid feedback and/or interaction between the changefeed and those writes
 
-It can be useful to consider keeping snapshots in the auxilliary collection employed by the changefeed in order to optimize the interrelated concerns of not reading data redundantly, and not feeding back into the oneself (although having separate roundtrips obviously has implications).
+It can be useful to consider keeping snapshots in the auxiliary collection employed by the changefeed in order to optimize the interrelated concerns of not reading data redundantly, and not feeding back into the oneself (although having separate roundtrips obviously has implications).
  
 # Cosmos Storage Model
 
@@ -610,7 +619,7 @@ The dominant pattern is that reads request _Tip_  with an `IfNoneMatch` precondi
 - `Found` - (if there are multiple writers and/or we don't have a cached version) - for the minimal possible cost (a point read, not a query), we have all we need to establish the state:-
     `i`: a version number
     `e`: events since that version number
-    `u`: unfolded (auxiliary) events computed at the same time as the batch of events was sent (aka inforamlly as snapshots) - (these enable us to establish the `state` without further queries or roundtrips to load and fold all preceding events)
+    `u`: unfolded (auxiliary) events computed at the same time as the batch of events was sent (aka informally as snapshots) - (these enable us to establish the `state` without further queries or roundtrips to load and fold all preceding events)
 
 ## Building a state from the Storage Model and/or the Cache
 
@@ -658,7 +667,7 @@ This covers what the most complete possible implementation of the JS Stored Proc
 
 The `sync` stored procedure takes as input, a document that is almost identical to the format of the _`Tip`_ batch (in fact, if the stream is found to be empty, it is pretty much the template for the first document created in the stream). The request includes the following elements:
 
-- `expectedVersion`: the position the requestor has based their [proposed] events on (no, [providing an `etag` to save on Request Charges is not possible in the Stored Proc](https://stackoverflow.com/questions/53355886/azure-cosmosdb-stored-procedure-ifmatch-predicate))
+- `expectedVersion`: the position the requester has based their [proposed] events on (no, [providing an `etag` to save on Request Charges is not possible in the Stored Proc](https://stackoverflow.com/questions/53355886/azure-cosmosdb-stored-procedure-ifmatch-predicate))
 - `e`: array of Events (see Event, above) to append iff the expectedVersion check is fulfilled
 - `u`: array of `unfold`ed events (aka snapshots) that supersede items with equivalent `c`ase values  
 - `maxEvents`: the maximum number of events in an individual batch prior to starting a new one. For example:
@@ -667,7 +676,7 @@ The `sync` stored procedure takes as input, a document that is almost identical 
   - if the total length including the new `e`vents would exceed `maxEvents`, the Tip is 'renamed' (gets its `id` set to `i.toString()`) to become a batch, and the new events go into the new Tip-Batch, the _tip_ gets frozen as a `Batch`, and the new request becomes the _tip_ (as an atomic transaction on the server side)
 
 - (PROPOSAL/FUTURE) `thirdPartyUnfoldRetention`: how many events to keep before the base (`i`) of the batch if required by lagging `u`nfolds which would otherwise fall out of scope as a result of the appends in this batch (this will default to `0`, so for example if a writer says maxEvents `10` and there is an `u`nfold based on an event more than `10` old it will be removed as part of the appending process)
-- (PROPOSAL/FUTURE): adding an `expectedEtag` would enable competing writers to maintain and update `u`nfold data in a consistent fashion (backign off and retrying in the case of conflict, _without any events being written per state change_)
+- (PROPOSAL/FUTURE): adding an `expectedEtag` would enable competing writers to maintain and update `u`nfold data in a consistent fashion (backing off and retrying in the case of conflict, _without any events being written per state change_)
 
 # Equinox.Cosmos.Core.Events
 
@@ -734,7 +743,7 @@ match res with
 | c -> failwithf "conflict %A" c
 ```
 
-# Roadmap
+# Ideas
 
 # Things that are incomplete and/or require work
 
@@ -744,7 +753,7 @@ This is a very loose laundry list of items that have occurred to us to do, given
 
 ## Wouldn't it be nice - `Equinox`
 
-- Performance tuning for non-store-specific logic; no perf tuning has been done to date (though some of the Store/Domain implementations do show perf-optimized fold implementation techniques). While in general the work is I/O bound, there are definitely opportunities to use `System.IO.Pipelines` etc, and the `MemoryStore` and CLI gives a good testbed to drive this improvement.
+- Performance tuning for non-store-specific logic; no perf tuning has been done to date (though some of the Store/Domain implementations do show perf-optimized fold implementation techniques). While in general the work is I/O bound, there are definitely opportunities to use `System.IO.Pipelines` etc, and the `MemoryStore` and `eqxtestbed` gives a good host drive this improvement.
 
 ## Wouldn't it be nice - `Equinox.EventStore`
 
@@ -761,10 +770,6 @@ EventStore, and it's Store adapter is the most proven and is pretty feature rich
 - performance, efficiency and concurrency improvements based on [`tip-isa-batch`](https://github.com/jet/equinox/tree/tip-isa-batch) schema generalization [#109](https://github.com/jet/equinox/issues/109)
 - performance improvements in loading logic
 - Perf tuning of `JObject` vs `UTF-8` arrays and/or using a different serializer [#79](https://github.com/jet/equinox/issues/79)
-
-## Wouldn't it be nice - `Equinox.SqlStreamStore`
-
-- See [#62](https://github.com/jet/equinox/issues/62)
 
 ## Wouldn't it be nice - `Equinox.DynamoDb`
 

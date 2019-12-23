@@ -4,10 +4,11 @@ open Swensen.Unquote
 open Equinox.MemoryStore
 
 let createMemoryStore () =
-    new VolatileStore()
+    new VolatileStore<_>()
 
 let createServiceMemory log store =
-    Backend.Cart.Service(log, Resolver(store, Domain.Cart.Folds.fold, Domain.Cart.Folds.initial).Resolve)
+    let resolve (id,opt) = Resolver(store, FsCodec.Box.Codec.Create(), Domain.Cart.Fold.fold, Domain.Cart.Fold.initial).Resolve(id,?option=opt)
+    Backend.Cart.Service(log, resolve)
 
 #nowarn "1182" // From hereon in, we may have some 'unused' privates (the tests)
 
@@ -26,10 +27,10 @@ type Tests(testOutputHelper) =
 
         // Act: Run the decision twice...
         let actTrappingStateAsSaved cartId =
-            service.FlowAsync(cartId, flow)
+            service.FlowAsync(cartId, false, flow)
 
         let actLoadingStateSeparately cartId = async {
-            let! _ = service.FlowAsync(cartId, flow)
+            let! _ = service.FlowAsync(cartId, false, flow)
             return! service.Read cartId }
         let! expected = cartId1 |> actTrappingStateAsSaved
         let! actual = cartId2 |> actLoadingStateSeparately
@@ -39,8 +40,8 @@ type Tests(testOutputHelper) =
 
         // Assert 2. Verify that the Command got correctly reflected in the state, with no extraneous effects
         let verifyFoldedStateReflectsCommand = function
-            | { Domain.Cart.Folds.State.items = [ item ] } ->
-                let expectedItem : Domain.Cart.Folds.ItemInfo = { skuId = skuId; quantity = quantity; returnsWaived = false }
+            | { Domain.Cart.Fold.State.items = [ item ] } ->
+                let expectedItem : Domain.Cart.Fold.ItemInfo = { skuId = skuId; quantity = quantity; returnsWaived = false }
                 test <@ expectedItem = item @>
             | x -> x |> failwithf "Expected to find item, got %A"
         verifyFoldedStateReflectsCommand expected

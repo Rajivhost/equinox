@@ -7,10 +7,12 @@ exception MissingArg of string
 
 [<RequireQualifiedAccess; NoEquality; NoComparison>]
 type StorageConfig =
-    | Memory of Equinox.MemoryStore.VolatileStore
-    | Es of Equinox.EventStore.Context * Equinox.EventStore.CachingStrategy option * unfolds: bool
+    // For MemoryStore, we keep the events as UTF8 arrays - we could use FsCodec.Codec.Box to remove the JSON encoding, which would improve perf but can conceal problems
+    | Memory of Equinox.MemoryStore.VolatileStore<byte[]>
+    | Es     of Equinox.EventStore.Context * Equinox.EventStore.CachingStrategy option * unfolds: bool
     | Cosmos of Equinox.Cosmos.Gateway * Equinox.Cosmos.CachingStrategy * unfolds: bool * databaseId: string * containerId: string
-    
+    | Sql    of Equinox.SqlStreamStore.Context * Equinox.SqlStreamStore.CachingStrategy option * unfolds: bool
+
 module MemoryStore =
     type [<NoEquality; NoComparison>] Arguments =
         | [<AltCommandLine("-vs")>] VerboseStore
@@ -20,41 +22,46 @@ module MemoryStore =
     let config () =
         StorageConfig.Memory (Equinox.MemoryStore.VolatileStore())
 
+let [<Literal>] appName = "equinox-tool"
+
 module Cosmos =
-    let envBackstop msg key =
-        match Environment.GetEnvironmentVariable key with
-        | null -> raise <| MissingArg (sprintf "Please provide a %s, either as an argment or via the %s environment variable" msg key)
-        | x -> x 
+    let private getEnvVarForArgumentOrThrow varName argName =
+        match Environment.GetEnvironmentVariable varName with
+        | null -> raise (MissingArg(sprintf "Please provide a %s, either as an argument or via the %s environment variable" argName varName))
+        | x -> x
+    let private defaultWithEnvVar varName argName = function
+        | None -> getEnvVarForArgumentOrThrow varName argName
+        | Some x -> x
 
     type [<NoEquality; NoComparison>] Arguments =
-        | [<AltCommandLine("-vs")>] VerboseStore
-        | [<AltCommandLine("-m")>] ConnectionMode of Equinox.Cosmos.ConnectionMode
-        | [<AltCommandLine("-o")>] Timeout of float
-        | [<AltCommandLine("-r")>] Retries of int
-        | [<AltCommandLine("-rt")>] RetriesWaitTime of int
-        | [<AltCommandLine("-s")>] Connection of string
-        | [<AltCommandLine("-d")>] Database of string
-        | [<AltCommandLine("-c")>] Container of string
+        | [<AltCommandLine "-vs">]      VerboseStore
+        | [<AltCommandLine "-m">]       ConnectionMode of Equinox.Cosmos.ConnectionMode
+        | [<AltCommandLine "-o">]       Timeout of float
+        | [<AltCommandLine "-r">]       Retries of int
+        | [<AltCommandLine "-rt">]      RetriesWaitTimeS of float
+        | [<AltCommandLine "-s">]       Connection of string
+        | [<AltCommandLine "-d">]       Database of string
+        | [<AltCommandLine "-c">]       Container of string
         interface IArgParserTemplate with
             member a.Usage =
                 match a with
                 | VerboseStore ->       "Include low level Store logging."
                 | Timeout _ ->          "specify operation timeout in seconds (default: 5)."
                 | Retries _ ->          "specify operation retries (default: 1)."
-                | RetriesWaitTime _ ->  "specify max wait-time for retry when being throttled by Cosmos in seconds (default: 5)"
-                | Connection _ ->       "specify a connection string for a Cosmos account (defaults: envvar:EQUINOX_COSMOS_CONNECTION, Cosmos Emulator)."
-                | ConnectionMode _ ->   "override the connection mode (default: Direct)."
-                | Database _ ->         "specify a database name for store (defaults: envvar:EQUINOX_COSMOS_DATABASE, test)."
-                | Container _ ->        "specify a container name for store (defaults: envvar:EQUINOX_COSMOS_CONTAINER, test)."
+                | RetriesWaitTimeS _ -> "specify max wait-time for retry when being throttled by Cosmos in seconds (default: 5)"
+                | ConnectionMode _ ->   "override the connection mode. Default: Direct."
+                | Connection _ ->       "specify a connection string for a Cosmos account. (optional if environment variable EQUINOX_COSMOS_CONNECTION specified)"
+                | Database _ ->         "specify a database name for store. (optional if environment variable EQUINOX_COSMOS_DATABASE specified)"
+                | Container _ ->        "specify a container name for store. (optional if environment variable EQUINOX_COSMOS_CONTAINER specified)"
     type Info(args : ParseResults<Arguments>) =
-        member __.Mode = args.GetResult(ConnectionMode,Equinox.Cosmos.ConnectionMode.Direct)
-        member __.Connection =  match args.TryGetResult Connection  with Some x -> x | None -> envBackstop "Connection" "EQUINOX_COSMOS_CONNECTION"
-        member __.Database =    match args.TryGetResult Database    with Some x -> x | None -> envBackstop "Database"   "EQUINOX_COSMOS_DATABASE"
-        member __.Container =   match args.TryGetResult Container   with Some x -> x | None -> envBackstop "Container"  "EQUINOX_COSMOS_CONTAINER"
+        member __.Mode =                args.GetResult(ConnectionMode,Equinox.Cosmos.ConnectionMode.Direct)
+        member __.Connection =          args.TryGetResult Connection |> defaultWithEnvVar "EQUINOX_COSMOS_CONNECTION" "Connection"
+        member __.Database =            args.TryGetResult Database   |> defaultWithEnvVar "EQUINOX_COSMOS_DATABASE"   "Database"
+        member __.Container =           args.TryGetResult Container  |> defaultWithEnvVar "EQUINOX_COSMOS_CONTAINER"  "Container"
 
-        member __.Timeout = args.GetResult(Timeout,5.) |> TimeSpan.FromSeconds
-        member __.Retries = args.GetResult(Retries,1)
-        member __.MaxRetryWaitTime = args.GetResult(RetriesWaitTime, 5)
+        member __.Timeout =             args.GetResult(Timeout,5.) |> TimeSpan.FromSeconds
+        member __.Retries =             args.GetResult(Retries,1)
+        member __.MaxRetryWaitTime =    args.GetResult(RetriesWaitTimeS, 5.) |> TimeSpan.FromSeconds
 
     /// Standing up an Equinox instance is necessary to run for test purposes; You'll need to either:
     /// 1) replace connection below with a connection string or Uri+Key for an initialized Equinox instance with a database and collection named "equinox-test"
@@ -65,20 +72,16 @@ module Cosmos =
 
     let private createGateway connection maxItems = Gateway(connection, BatchingPolicy(defaultMaxItems=maxItems))
     let connection (log: ILogger, storeLog: ILogger) (a : Info) =
-        let (Discovery.UriAndKey (endpointUri,_)) as discovery = a.Connection|> Discovery.FromConnectionString
+        let (Discovery.UriAndKey (endpointUri,_)) as discovery = a.Connection |> Discovery.FromConnectionString
         log.Information("CosmosDb {mode} {connection} Database {database} Container {container}",
             a.Mode, endpointUri, a.Database, a.Container)
         log.Information("CosmosDb timeout {timeout}s; Throttling retries {retries}, max wait {maxRetryWaitTime}s",
-            (let t = a.Timeout in t.TotalSeconds), a.Retries, a.MaxRetryWaitTime)
+            (let t = a.Timeout in t.TotalSeconds), a.Retries, let x = a.MaxRetryWaitTime in x.TotalSeconds)
         discovery, a.Database, a.Container, Connector(a.Timeout, a.Retries, a.MaxRetryWaitTime, log=storeLog, mode=a.Mode)
     let config (log: ILogger, storeLog) (cache, unfolds, batchSize) info =
         let discovery, dName, cName, connector = connection (log, storeLog) info
-        let conn = connector.Connect("equinox-tool", discovery) |> Async.RunSynchronously
-        let cacheStrategy =
-            if cache then
-                let c = Caching.Cache("equinox-tool", sizeMb = 50)
-                CachingStrategy.SlidingWindow (c, TimeSpan.FromMinutes 20.)
-            else CachingStrategy.NoCaching
+        let conn = connector.Connect(appName, discovery) |> Async.RunSynchronously
+        let cacheStrategy = match cache with Some c -> CachingStrategy.SlidingWindow (c, TimeSpan.FromMinutes 20.) | None -> CachingStrategy.NoCaching
         StorageConfig.Cosmos (createGateway conn batchSize, cacheStrategy, unfolds, dName, cName)
 
 /// To establish a local node to run the tests against:
@@ -86,14 +89,14 @@ module Cosmos =
 ///   2. & $env:ProgramData\chocolatey\bin\EventStore.ClusterNode.exe --gossip-on-single-node --discover-via-dns 0 --ext-http-port=30778
 module EventStore =
     type [<NoEquality; NoComparison>] Arguments =
-        | [<AltCommandLine("-vs")>] VerboseStore
-        | [<AltCommandLine("-o")>] Timeout of float
-        | [<AltCommandLine("-r")>] Retries of int
-        | [<AltCommandLine("-g")>] Host of string
-        | [<AltCommandLine("-u")>] Username of string
-        | [<AltCommandLine("-p")>] Password of string
-        | [<AltCommandLine("-c")>] ConcurrentOperationsLimit of int
-        | [<AltCommandLine("-h")>] HeartbeatTimeout of float
+        | [<AltCommandLine("-vs")>]     VerboseStore
+        | [<AltCommandLine("-o")>]      Timeout of float
+        | [<AltCommandLine("-r")>]      Retries of int
+        | [<AltCommandLine("-g")>]      Host of string
+        | [<AltCommandLine("-u")>]      Username of string
+        | [<AltCommandLine("-p")>]      Password of string
+        | [<AltCommandLine("-c")>]      ConcurrentOperationsLimit of int
+        | [<AltCommandLine("-h")>]      HeartbeatTimeout of float
         interface IArgParserTemplate with
             member a.Usage = a |> function
                 | VerboseStore ->       "include low level Store logging."
@@ -108,12 +111,12 @@ module EventStore =
     open Equinox.EventStore
 
     type Info(args : ParseResults<Arguments>) =
-        member __.Host = args.GetResult(Host,"localhost")
-        member __.Credentials = args.GetResult(Username,"admin"), args.GetResult(Password,"changeit")
+        member __.Host =                args.GetResult(Host,"localhost")
+        member __.Credentials =         args.GetResult(Username,"admin"), args.GetResult(Password,"changeit")
 
-        member __.Timeout = args.GetResult(Timeout,5.) |> TimeSpan.FromSeconds
-        member __.Retries = args.GetResult(Retries, 1)
-        member __.HeartbeatTimeout = args.GetResult(HeartbeatTimeout,1.5) |> float |> TimeSpan.FromSeconds
+        member __.Timeout =             args.GetResult(Timeout,5.) |> TimeSpan.FromSeconds
+        member __.Retries =             args.GetResult(Retries, 1)
+        member __.HeartbeatTimeout =    args.GetResult(HeartbeatTimeout,1.5) |> float |> TimeSpan.FromSeconds
         member __.ConcurrentOperationsLimit = args.GetResult(ConcurrentOperationsLimit,5000)
 
     open Serilog
@@ -123,7 +126,7 @@ module EventStore =
                 heartbeatTimeout=heartbeatTimeout, concurrentOperationsLimit = col,
                 log=(if log.IsEnabled(Serilog.Events.LogEventLevel.Debug) then Logger.SerilogVerbose log else Logger.SerilogNormal log),
                 tags=["M", Environment.MachineName; "I", Guid.NewGuid() |> string])
-            .Establish("equinox-tool", Discovery.GossipDns dnsQuery, ConnectionStrategy.ClusterTwinPreferSlaveReads)
+            .Establish(appName, Discovery.GossipDns dnsQuery, ConnectionStrategy.ClusterTwinPreferSlaveReads)
     let private createGateway connection batchSize = Context(connection, BatchingPolicy(maxBatchSize = batchSize))
     let config (log: ILogger, storeLog) (cache, unfolds, batchSize) (args : ParseResults<Arguments>) =
         let a = Info(args)
@@ -133,9 +136,85 @@ module EventStore =
         log.Information("EventStore {host} heartbeat: {heartbeat}s timeout: {timeout}s concurrent reqs: {concurrency} retries {retries}",
             a.Host, heartbeatTimeout.TotalSeconds, timeout.TotalSeconds, concurrentOperationsLimit, retries)
         let conn = connect storeLog (a.Host, heartbeatTimeout, concurrentOperationsLimit) a.Credentials operationThrottling |> Async.RunSynchronously
-        let cacheStrategy =
-            if cache then
-                let c = Caching.Cache("equinox-tool", sizeMb = 50)
-                CachingStrategy.SlidingWindow (c, TimeSpan.FromMinutes 20.) |> Some
-            else None
+        let cacheStrategy = cache |> Option.map (fun c -> CachingStrategy.SlidingWindow (c, TimeSpan.FromMinutes 20.))
         StorageConfig.Es ((createGateway conn batchSize), cacheStrategy, unfolds)
+
+module Sql =
+    open Equinox.SqlStreamStore
+    open Serilog
+    let cacheStrategy cache = cache |> Option.map (fun c -> CachingStrategy.SlidingWindow (c, TimeSpan.FromMinutes 20.))
+    module Ms =
+        type [<NoEquality; NoComparison>] Arguments =
+            | [<AltCommandLine "-c"; Mandatory>] ConnectionString of string
+            | [<AltCommandLine "-s">]       Schema of string
+            | [<AltCommandLine "-p">]       Credentials of string
+            | [<AltCommandLine "-A">]       AutoCreate
+            interface IArgParserTemplate with
+                member a.Usage = a |> function
+                    | ConnectionString _ -> "Database connection string"
+                    | Schema _ ->           "Database schema name"
+                    | Credentials _ ->      "Database credentials"
+                    | AutoCreate _ ->       "AutoCreate schema"
+        type Info(args : ParseResults<Arguments>) =
+            member __.ConnectionString =    args.GetResult ConnectionString
+            member __.Schema =              args.GetResult(Schema,null)
+            member __.Credentials =         args.GetResult(Credentials,null)
+            member __.AutoCreate =          args.Contains AutoCreate
+        let connect (log : ILogger) (connectionString,schema,credentials,autoCreate) =
+            let sssConnectionString = String.Join(";", connectionString, credentials)
+            log.Information("SqlStreamStore MsSql Connection {connectionString} Schema {schema} AutoCreate {autoCreate}", connectionString, schema, autoCreate)
+            Equinox.SqlStreamStore.MsSql.Connector(sssConnectionString,schema,autoCreate=autoCreate).Establish(appName)
+        let private createGateway connection batchSize = Context(connection, BatchingPolicy(maxBatchSize = batchSize))
+        let config (log: ILogger) (cache, unfolds, batchSize) (args : ParseResults<Arguments>) =
+            let a = Info(args)
+            let conn = connect log (a.ConnectionString, a.Schema, a.Credentials, a.AutoCreate) |> Async.RunSynchronously
+            StorageConfig.Sql((createGateway conn batchSize), cacheStrategy cache, unfolds)
+    module My =
+        type [<NoEquality; NoComparison>] Arguments =
+            | [<AltCommandLine "-c"; Mandatory>] ConnectionString of string
+            | [<AltCommandLine "-p">]       Credentials of string
+            | [<AltCommandLine "-A">]       AutoCreate
+            interface IArgParserTemplate with
+                member a.Usage = a |> function
+                    | ConnectionString _ -> "Database connection string"
+                    | Credentials _ ->      "Database credentials"
+                    | AutoCreate _ ->       "AutoCreate schema"
+        type Info(args : ParseResults<Arguments>) =
+            member __.ConnectionString =    args.GetResult ConnectionString
+            member __.Credentials =         args.GetResult(Credentials,null)
+            member __.AutoCreate =          args.Contains AutoCreate
+        let connect (log : ILogger) (connectionString,credentials,autoCreate) =
+            let sssConnectionString = String.Join(";", connectionString, credentials)
+            log.Information("SqlStreamStore MySql Connection {connectionString} AutoCreate {autoCreate}", connectionString, autoCreate)
+            Equinox.SqlStreamStore.MySql.Connector(sssConnectionString,autoCreate=autoCreate).Establish(appName)
+        let private createGateway connection batchSize = Context(connection, BatchingPolicy(maxBatchSize = batchSize))
+        let config (log: ILogger) (cache, unfolds, batchSize) (args : ParseResults<Arguments>) =
+            let a = Info(args)
+            let conn = connect log (a.ConnectionString, a.Credentials, a.AutoCreate) |> Async.RunSynchronously
+            StorageConfig.Sql((createGateway conn batchSize), cacheStrategy cache, unfolds)
+     module Pg =
+        type [<NoEquality; NoComparison>] Arguments =
+            | [<AltCommandLine "-c"; Mandatory>] ConnectionString of string
+            | [<AltCommandLine "-s">]       Schema of string
+            | [<AltCommandLine "-p">]       Credentials of string
+            | [<AltCommandLine "-A">]       AutoCreate
+            interface IArgParserTemplate with
+                member a.Usage = a |> function
+                    | ConnectionString _ -> "Database connection string"
+                    | Schema _ ->           "Database schema name"
+                    | Credentials _ ->      "Database credentials"
+                    | AutoCreate _ ->       "AutoCreate schema"
+        type Info(args : ParseResults<Arguments>) =
+            member __.ConnectionString =    args.GetResult ConnectionString
+            member __.Schema =              args.GetResult(Schema,null)
+            member __.Credentials =         args.GetResult(Credentials,null)
+            member __.AutoCreate =          args.Contains AutoCreate
+        let connect (log : ILogger) (connectionString,schema,credentials,autoCreate) =
+            let sssConnectionString = String.Join(";", connectionString, credentials)
+            log.Information("SqlStreamStore Postgres Connection {connectionString} Schema {schema} AutoCreate {autoCreate}", connectionString, schema, autoCreate)
+            Equinox.SqlStreamStore.Postgres.Connector(sssConnectionString,schema,autoCreate=autoCreate).Establish(appName)
+        let private createGateway connection batchSize = Context(connection, BatchingPolicy(maxBatchSize = batchSize))
+        let config (log: ILogger) (cache, unfolds, batchSize) (args : ParseResults<Arguments>) =
+            let a = Info(args)
+            let conn = connect log (a.ConnectionString, a.Schema, a.Credentials, a.AutoCreate) |> Async.RunSynchronously
+            StorageConfig.Sql((createGateway conn batchSize), cacheStrategy cache, unfolds)

@@ -3,31 +3,30 @@
 open Equinox
 open Equinox.Cosmos.Integration
 open Swensen.Unquote
-open Xunit
 
 #nowarn "1182" // From hereon in, we may have some 'unused' privates (the tests)
 
-let fold, initial = Domain.Favorites.Folds.fold, Domain.Favorites.Folds.initial
-let snapshot = Domain.Favorites.Folds.isOrigin, Domain.Favorites.Folds.compact
+let fold, initial = Domain.Favorites.Fold.fold, Domain.Favorites.Fold.initial
+let snapshot = Domain.Favorites.Fold.isOrigin, Domain.Favorites.Fold.snapshot
 
 let createMemoryStore () =
-    new MemoryStore.VolatileStore()
+    new MemoryStore.VolatileStore<_>()
 let createServiceMemory log store =
-    Backend.Favorites.Service(log, MemoryStore.Resolver(store, fold, initial).Resolve)
+    Backend.Favorites.Service(log, MemoryStore.Resolver(store, FsCodec.Box.Codec.Create(), fold, initial).Resolve)
 
 let codec = Domain.Favorites.Events.codec
 let createServiceGes gateway log =
-    let resolveStream = EventStore.Resolver(gateway, codec, fold, initial, access = EventStore.AccessStrategy.RollingSnapshots snapshot).Resolve
-    Backend.Favorites.Service(log, resolveStream)
+    let resolve = EventStore.Resolver(gateway, codec, fold, initial, access = EventStore.AccessStrategy.RollingSnapshots snapshot).Resolve
+    Backend.Favorites.Service(log, resolve)
 
 let createServiceCosmos gateway log =
-    let resolveStream = Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Snapshot snapshot).Resolve
-    Backend.Favorites.Service(log, resolveStream)
+    let resolve = Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Snapshot snapshot).Resolve
+    Backend.Favorites.Service(log, resolve)
 
-let createServiceCosmosRollingUnfolds gateway log =
-    let access = Cosmos.AccessStrategy.RollingUnfolds(Domain.Favorites.Folds.isOrigin, Domain.Favorites.Folds.transmute)
-    let resolveStream = Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, access).Resolve
-    Backend.Favorites.Service(log, resolveStream)
+let createServiceCosmosRollingState gateway log =
+    let access = Cosmos.AccessStrategy.RollingState Domain.Favorites.Fold.snapshot
+    let resolve = Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, access).Resolve
+    Backend.Favorites.Service(log, resolve)
 
 type Tests(testOutputHelper) =
     let testOutput = TestOutputAdapter testOutputHelper
@@ -73,6 +72,6 @@ type Tests(testOutputHelper) =
         let log = createLog ()
         let! conn = connectToSpecifiedCosmosOrSimulator log
         let gateway = createCosmosContext conn defaultBatchSize
-        let service = createServiceCosmosRollingUnfolds gateway log
+        let service = createServiceCosmosRollingState gateway log
         do! act service args
     }

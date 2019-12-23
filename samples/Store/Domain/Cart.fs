@@ -1,6 +1,6 @@
 ﻿module Domain.Cart
 
-// NB - these schemas reflect the actual storage formats and hence need to be versioned with care
+// NOTE - these types and the union case names reflect the actual storage formats and hence need to be versioned with care
 module Events =
     type ContextInfo =              { time: System.DateTime; requestId: RequestId }
 
@@ -15,36 +15,35 @@ module Events =
         type State =                { items: StateItemInfo[] }
 
     type Event =
-        | Compacted                 of Compaction.State
+        | Snapshotted               of Compaction.State
         | ItemAdded                 of ItemAddInfo
         | ItemRemoved               of ItemRemoveInfo
         | ItemQuantityChanged       of ItemQuantityChangeInfo
         | ItemWaiveReturnsChanged   of ItemWaiveReturnsInfo
         interface TypeShape.UnionContract.IUnionContract
     let codec = FsCodec.NewtonsoftJson.Codec.Create<Event>()
+    let (|ForCartId|) (id: CartId) = Equinox.AggregateId ("Cart", CartId.toStringN id)
 
-module Folds =
+module Fold =
     type ItemInfo =                 { skuId: SkuId; quantity: int; returnsWaived: bool }
     type State =                    { items: ItemInfo list }
     module State =
         let toSnapshot (s: State) : Events.Compaction.State =
             { items = [| for i in s.items -> { skuId = i.skuId; quantity = i.quantity; returnsWaived = i.returnsWaived } |] }
-        let ofCompacted (s: Events.Compaction.State) : State =
+        let ofSnapshot (s: Events.Compaction.State) : State =
             { items = [ for i in s.items -> { skuId = i.skuId; quantity = i.quantity; returnsWaived = i.returnsWaived } ] }
     let initial = { items = [] }
     let evolve (state : State) event =
         let updateItems f = { state with items = f state.items }
         match event with
-        | Events.Compacted s -> State.ofCompacted s
+        | Events.Snapshotted s -> State.ofSnapshot s
         | Events.ItemAdded e -> updateItems (fun current -> { skuId = e.skuId; quantity = e.quantity; returnsWaived = false  } :: current)
         | Events.ItemRemoved e -> updateItems (List.filter (fun x -> x.skuId <> e.skuId))
         | Events.ItemQuantityChanged e -> updateItems (List.map (function i when i.skuId = e.skuId -> { i with quantity = e.quantity } | i -> i))
         | Events.ItemWaiveReturnsChanged e -> updateItems (List.map (function i when i.skuId = e.skuId -> { i with returnsWaived = e.waived } | i -> i))
-    let fold state = Seq.fold evolve state
-    let isOrigin = function Events.Compacted _ -> true | _ -> false
-    let compact = State.toSnapshot >> Events.Compacted
-    /// This transmute impl a) removes events - we're not interested in storing the events b) packs the post-state into a Compacted unfold-event
-    let transmute _events state = [],[compact state]
+    let fold : State -> Events.Event seq -> State = Seq.fold evolve
+    let isOrigin = function Events.Snapshotted _ -> true | _ -> false
+    let snapshot = State.toSnapshot >> Events.Snapshotted
 type Context =              { time: System.DateTime; requestId : RequestId }
 type Command =
     | AddItem               of Context * SkuId * quantity: int
@@ -52,7 +51,7 @@ type Command =
     | RemoveItem            of Context * SkuId
 
 module Commands =
-    let interpret command (state : Folds.State) =
+    let interpret command (state : Fold.State) =
         let itemExists f                                    = state.items |> List.exists f
         let itemExistsWithDifferentWaiveStatus skuId waive  = itemExists (fun x -> x.skuId = skuId && x.returnsWaived <> waive)
         let itemExistsWithDifferentQuantity skuId quantity  = itemExists (fun x -> x.skuId = skuId && x.quantity <> quantity)

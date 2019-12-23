@@ -2,9 +2,8 @@
 
 open Equinox.Cosmos.Core
 open Equinox.Cosmos.Integration.Infrastructure
+open FsCodec
 open FSharp.Control
-open FsCodec // Shadow FSharp.Control.IEvent
-open FsCodec.Core
 open Newtonsoft.Json.Linq
 open Swensen.Unquote
 open Serilog
@@ -58,7 +57,7 @@ type Tests(testOutputHelper) =
         verifyRequestChargesMax 41 // observed 40.78 // was 11
     }
 
-    // It's conceivable that in the future we might allow zero-length batches as long as a sync mechanism leveraging the etags and unfolds updote mechanisms
+    // It's conceivable that in the future we might allow zero-length batches as long as a sync mechanism leveraging the etags and unfolds update mechanisms
     // As it stands with the NoTipEvents stored proc, permitting empty batches a) yields an invalid state b) provides no conceivable benefit
     [<AutoData(SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_COSMOS")>]
     let ``append Throws when passed an empty batch`` (TestStream streamName) = Async.RunSynchronously <| async {
@@ -92,7 +91,7 @@ type Tests(testOutputHelper) =
         return TestEvents.Create(0,6)
     }
 
-    let verifyCorrectEventsEx direction baseIndex (expected: IEvent<_>[]) (xs: IIndexedEvent<_>[]) =
+    let verifyCorrectEventsEx direction baseIndex (expected: IEventData<_>[]) (xs: ITimelineEvent<byte[]>[]) =
         let xs, baseIndex =
             if direction = Equinox.Cosmos.Store.Direction.Forward then xs, baseIndex
             else Array.rev xs, baseIndex - int64 (Array.length expected) + 1L
@@ -135,7 +134,7 @@ type Tests(testOutputHelper) =
         pos <- pos + 42L
         pos =! res
         test <@ [EqxAct.Append] = capture.ExternalCalls @>
-        verifyRequestChargesMax 46 // 45.91 // WAS 20
+        verifyRequestChargesMax 48 // 47.02 // WAS 20
         capture.Clear()
 
         let! res = Events.getNextIndex ctx streamName
@@ -150,7 +149,7 @@ type Tests(testOutputHelper) =
         let extrasCount = match extras with x when x > 50 -> 5000 | x when x < 1 -> 1 | x -> x*100
         let! _pos = ctx.NonIdempotentAppend(stream, TestEvents.Create (int pos,extrasCount))
         test <@ [EqxAct.Append] = capture.ExternalCalls @>
-        verifyRequestChargesMax 460 // 451.01 observed
+        verifyRequestChargesMax 465 // 463.01 observed
         capture.Clear()
 
         let! pos = ctx.Sync(stream,?position=None)

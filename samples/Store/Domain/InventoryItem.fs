@@ -3,7 +3,7 @@ module Domain.InventoryItem
 
 open System
 
-// NB - these schemas reflect the actual storage formats and hence need to be versioned with care
+// NOTE - these types and the union case names reflect the actual storage formats and hence need to be versioned with care
 module Events =
     type Event =
         | Created of name: string
@@ -12,8 +12,9 @@ module Events =
         | Removed of count: int
         | CheckedIn of count: int
         interface TypeShape.UnionContract.IUnionContract
+    let (|ForInventoryItemId|) (id : InventoryItemId) = Equinox.AggregateId ("InventoryItem", InventoryItemId.toStringN id)
 
-module Folds =
+module Fold =
     type State = { active : bool; name: string; quantity: int }
     let initial : State = { active = true; name = null; quantity = 0 }
     let private evolve state = function
@@ -34,7 +35,7 @@ type Command =
 
 module Commands =
     // TODO make commands/event representations idempotent
-    let interpret command (state : Folds.State) =
+    let interpret command (state : Fold.State) =
         match command with
         | Create name ->
             if String.IsNullOrEmpty name then invalidArg "name" ""

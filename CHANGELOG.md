@@ -9,14 +9,74 @@ The `Unreleased` section name is replaced by the expected version of next releas
 ## [Unreleased]
 
 ### Added
+
+- `eqx dump` perf + logging improvements
+- `eqx dump -P` turns off JSON pretty printing
+- `Cosmos`: `Tip 200` now logs received `n` and `_etag` values
+
 ### Changed
 
-- Updated `MinVer` to `2.0.0-alpha.2`
+- Update to `Microsoft.SourceLink.GitHub` v `1.0.0`
+- Samples etc target `Argu` v `6.0.0`
+- `eqx dump`'s `-J` switch now turns off JSON rendering
+- `eqx -vc dump` now renders Store `.Information` logs
+- Samples consistently use `module Fold`, `(Events.ForX streamId)`, removed `(|Stream|)`  [#174](https://github.com/jet/equinox/pull/174) 
 
 ### Removed
 ### Fixed
 
+- `eqx`: Reinstated writing of missing commandline argument messages to console
+- `Cosmos`: Fix `null` Data handling exception when log level <= `Debug`
+
 <a name="2.0.0"></a>
+<a name="2.0.0-rc8"></a>
+## [2.0.0-rc8] - 2019-11-14
+
+### Added
+
+- `SqlStreamStore`: Full support for Microsoft Sql Server, MySQL and Postgres using [SqlStreamStore](https://github.com/SQLStreamStore/SQLStreamStore) [#168](https://github.com/jet/equinox/pull/168) :pray: [@rajivhost](https://github.com/rajivhost) 
+- `Cosmos`: Exposed a `Connector.CreateClient` for interop with V2 ChangeFeedProcessor and `Propulsion.Cosmos` [#171](https://github.com/jet/equinox/pull/171) 
+- `Cosmos`: Codified `AccessStrategy.RollingState` [#178](https://github.com/jet/equinox/pull/178) :pray: [@jgardella](https://github.com/jgardella)
+- `Cosmos`: Added `eqx stats` command to count streams/docs/events in a CosmosDb Container re [#127](https://github.com/jet/equinox/issues/127) [#176](https://github.com/jet/equinox/pull/176) 
+- `MemoryStore`: Supports custom Codec logic (can use `FsCodec.Box.Codec` as default) [#173](https://github.com/jet/equinox/pull/173) 
+- `eqx dump [store]`: Show event data from store [#177](https://github.com/jet/equinox/pull/177)
+
+### Changed
+
+- Targeted `Destructurama.FSharp` v `1.1.1-dev-00033` [dotnet-templates#36](https://github.com/jet/dotnet-templates/issues/36)
+- Targeted `FsCodec` v `1.2.1`
+- `Cosmos`: renamed `Connector`'s `maxRetryAttemptsOnThrottledRequests` and `maxRetryWaitTimeInSeconds` to maxRetryAttemptsOnRateLimitedRequests` and `maxRetryWaitTimeOnRateLimitedRequests` and changed latter to `TimeSpan` to match V3 SDK [#171](https://github.com/jet/equinox/pull/171) 
+- `AccessStrategy`: consistent naming for Union cases and arguments; rewrote xmldoc [#178](https://github.com/jet/equinox/pull/178) :pray: [@jgardella](https://github.com/jgardella)
+
+### Removed
+
+- `Resolver.ResolveEx` [#172](https://github.com/jet/equinox/pull/172)
+
+### Fixed
+
+- `Cosmos`: fixed accidentally swapped `count` and `bytes` metrics field values
+
+<a name="2.0.0-rc7"></a>
+## [2.0.0-rc7] - 2019-10-17
+
+### Added
+
+- `.Cosmos`: ability to inhibit server certificate validation via `Connector`'s `bypassCertificateValidation` option [#170](https://github.com/jet/equinox/pull/170) :pray: [@Kelvin4702](https://github.com/Kelvin4702)
+- store-neutral `ICache`; centralized implementation in `Equinox.Core` [#161](https://github.com/jet/equinox/pull/161) :pray: [@DSilence](https://github.com/DSilence)
+- `ResolveOption.AllowStale`, maximizing use of OCC for `Stream.Transact`, enabling stale reads (in the face of multiple writers) for `Stream.Query` [#167](https://github.com/jet/equinox/pull/167)
+- Ability to (optionally) pass a `'Context` when creating a `Stream`, in order to be able to interop with FsCodec's `CorrelationId` and `CausationId` fields (as added in [FsCodec#22](https://github.com/jet/FsCodec/pulls/22)) [#169](https://github.com/jet/equinox/pull/169)
+
+### Changed
+
+- Updated minimum `Microsoft.Azure.DocumentDb[.Core]` dep from `2.0.0` to `2.2.0` (required for [#170](https://github.com/jet/equinox/pull/170))
+- Updated `FsCodec` to `1.0.0` to pick up final name changes [#162](https://github.com/jet/equinox/pull/162)
+- Replaced `TargetId.AggregateIdEmpty` with `ResolveOption.AssumeEmpty` [#163](https://github.com/jet/equinox/pull/163)
+- Extracted `Equinox.Core` module [#164](https://github.com/jet/equinox/pull/164)
+- Used `Transact` name consistently in `Accumulator` (follow-up to [#97](https://github.com/jet/equinox/pull/97)) [#166](https://github.com/jet/equinox/pull/166)
+- Changed all curried Methods to tupled
+- `.EventStore` now caches written values [#167](https://github.com/jet/equinox/pull/167)
+- (internal) Updated `MinVer` to `2.0.0`
+
 <a name="2.0.0-rc6"></a>
 ## [2.0.0-rc6] - 2019-09-07
 
@@ -280,7 +340,9 @@ The `Unreleased` section name is replaced by the expected version of next releas
 
 (For information pertaining to earlier releases, see release notes in https://github.com/jet/equinox/releases and/or can someone please add it!)
 
-[Unreleased]: https://github.com/jet/equinox/compare/2.0.0-rc6...HEAD
+[Unreleased]: https://github.com/jet/equinox/compare/2.0.0-rc8...HEAD
+[2.0.0-rc8]: https://github.com/jet/equinox/compare/2.0.0-rc7...2.0.0-rc8
+[2.0.0-rc7]: https://github.com/jet/equinox/compare/2.0.0-rc6...2.0.0-rc7
 [2.0.0-rc6]: https://github.com/jet/equinox/compare/2.0.0-rc5...2.0.0-rc6
 [2.0.0-rc5]: https://github.com/jet/equinox/compare/2.0.0-rc4...2.0.0-rc5
 [2.0.0-rc4]: https://github.com/jet/equinox/compare/2.0.0-rc3...2.0.0-rc4

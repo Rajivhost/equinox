@@ -8,28 +8,29 @@ open Swensen.Unquote
 
 #nowarn "1182" // From hereon in, we may have some 'unused' privates (the tests)
 
-let fold, initial = Domain.Cart.Folds.fold, Domain.Cart.Folds.initial
-let snapshot = Domain.Cart.Folds.isOrigin, Domain.Cart.Folds.compact
+let fold, initial = Domain.Cart.Fold.fold, Domain.Cart.Fold.initial
+let snapshot = Domain.Cart.Fold.isOrigin, Domain.Cart.Fold.snapshot
 
 let createMemoryStore () =
-    new VolatileStore ()
+    // we want to validate that the JSON UTF8 is working happily
+    new VolatileStore<byte[]>()
 let createServiceMemory log store =
-    Backend.Cart.Service(log, Resolver(store, fold, initial).Resolve)
+    Backend.Cart.Service(log, fun (id,opt) -> MemoryStore.Resolver(store, Domain.Cart.Events.codec, fold, initial).Resolve(id,?option=opt))
 
 let codec = Domain.Cart.Events.codec
 
 let resolveGesStreamWithRollingSnapshots gateway =
-    EventStore.Resolver(gateway, codec, fold, initial, access = AccessStrategy.RollingSnapshots snapshot).Resolve
+    fun (id,opt) -> EventStore.Resolver(gateway, codec, fold, initial, access = AccessStrategy.RollingSnapshots snapshot).Resolve(id,?option=opt)
 let resolveGesStreamWithoutCustomAccessStrategy gateway =
-    EventStore.Resolver(gateway, codec, fold, initial).Resolve
+    fun (id,opt) -> EventStore.Resolver(gateway, codec, fold, initial).Resolve(id,?option=opt)
 
 let resolveCosmosStreamWithSnapshotStrategy gateway =
-    Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Snapshot snapshot).Resolve
+    fun (id,opt) -> Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Snapshot snapshot).Resolve(id,?option=opt)
 let resolveCosmosStreamWithoutCustomAccessStrategy gateway =
-    Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching).Resolve
+    fun (id,opt) -> Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Unoptimized).Resolve(id,?option=opt)
 
 let addAndThenRemoveItemsManyTimesExceptTheLastOne context cartId skuId (service: Backend.Cart.Service) count =
-    service.FlowAsync(cartId, fun _ctx execute ->
+    service.FlowAsync(cartId, false, fun _ctx execute ->
         for i in 1..count do
             execute <| Domain.Cart.AddItem (context, skuId, i)
             if i <> count then
@@ -53,11 +54,11 @@ type Tests(testOutputHelper) =
         do! act service args
     }
 
-    let arrange connect choose resolveStream = async {
+    let arrange connect choose resolve = async {
         let log = createLog ()
         let! conn = connect log
         let gateway = choose conn defaultBatchSize
-        return Backend.Cart.Service(log, resolveStream gateway) }
+        return Backend.Cart.Service(log, resolve gateway) }
 
     [<AutoData(SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_EVENTSTORE")>]
     let ``Can roundtrip against EventStore, correctly folding the events without compaction semantics`` args = Async.RunSynchronously <| async {
