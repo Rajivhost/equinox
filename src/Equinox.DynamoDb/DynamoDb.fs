@@ -7,46 +7,23 @@ open Equinox.Core
 open Amazon.DynamoDBv2
 open FSharp.AWS.DynamoDB
 
-type Position =
+type EventData =
     {
-        CommitPosition: int64
-        PreparePosition: int64
+        EventId: Guid
+        Type: string
+        IsJson: bool
+        Data: byte array
+        Metadata: byte array
     }
 
-module Position =
-    let Start = {Position.CommitPosition = 0L; PreparePosition = 0L}
-    let End = {Position.CommitPosition = -1L; PreparePosition = -1L}
-
-//type EventData =
-//    {
-//        EventId: Guid
-//        Type: string
-//        IsJson: bool
-//        Data: byte array
-//        Metadata: byte array
-//    }
-
-type EventData =
+type EventStream =
     {
         [<HashKey>]
         StreamId : string
-
         [<RangeKey>]
-        EventNumber: int64
-
-        EventType: string
-
-        CreateAt : DateTimeOffset
-
-        IsJson: bool
-
-        Data : byte array
-    }
-
-type WriteResult  =
-    {
-        NextExpectedVersion: int64
-        LogPosition: Position
+        Version: int64
+        CreatedAt : DateTimeOffset
+        Events: EventData[]
     }
 
 [<RequireQualifiedAccess>]
@@ -74,7 +51,7 @@ module Log =
         log |> propEvents name (seq {
             for x in events do
                 if x.IsJson then
-                    yield System.Collections.Generic.KeyValuePair<_,_>(x.EventType, System.Text.Encoding.UTF8.GetString x.Data) })
+                    yield System.Collections.Generic.KeyValuePair<_,_>(x.Type, System.Text.Encoding.UTF8.GetString x.Data) })
 
     //let propResolvedEvents name (events : ResolvedEvent[]) (log : ILogger) =
     //    log |> propEvents name (seq {
@@ -177,4 +154,51 @@ module Log =
             for uom, f in measures do let d = f duration in if d <> 0. then logPeriodicRate uom (float totalCount/d |> int64)
 
 [<RequireQualifiedAccess; NoEquality; NoComparison>]
-type EsSyncResult = Written of WriteResult | Conflict of actualVersion: int64
+type EsSyncResult = Written of TableKey | Conflict of actualVersion: int64
+
+module private Write =
+    /// Yields `EsSyncResult.Written` or `EsSyncResult.Conflict` to signify WrongExpectedVersion
+    let private writeEventsAsync (log : ILogger) (conn : TableContext<EventStream>) (streamName : string) (version : int64) (events : EventData[])
+        : Async<EsSyncResult> = async {
+        try
+            let stream = {
+                    EventStream.StreamId = streamName
+                    Version = version
+                    CreatedAt = DateTimeOffset.UtcNow
+                    Events = events
+                }
+
+            let! key = conn.PutItemAsync(stream)
+            return EsSyncResult.Written key
+        //with :? EventStore.ClientAPI.Exceptions.WrongExpectedVersionException as ex ->
+        //    log.Information(ex, "Ges TrySync WrongExpectedVersionException writing {EventTypes}, actual {ActualVersion}",
+        //        [| for x in events -> x.Type |], ex.ActualVersion)
+          with ex ->
+            return EsSyncResult.Conflict -1L }
+
+    let eventDataBytes events =
+        let eventDataLen (x : EventData) = match x.Data, x.Metadata with Log.BlobLen bytes, Log.BlobLen metaBytes -> bytes + metaBytes
+        events |> Array.sumBy eventDataLen
+
+    let private writeEventsLogged (conn : TableContext<EventStream>) (streamName : string) (version : int64) (events : EventData[]) (log : ILogger)
+        : Async<EsSyncResult> = async {
+        let log = if (not << log.IsEnabled) Events.LogEventLevel.Debug then log else log |> Log.propEventData "Json" events
+        let bytes, count = eventDataBytes events, events.Length
+        let log = log |> Log.prop "bytes" bytes
+        let writeLog = log |> Log.prop "stream" streamName |> Log.prop "expectedVersion" version |> Log.prop "count" count
+        let! t, result = writeEventsAsync writeLog conn streamName version events |> Stopwatch.Time
+        let reqMetric : Log.Measurement = { stream = streamName; interval = t; bytes = bytes; count = count}
+        let resultLog, evt =
+            match result, reqMetric with
+            | EsSyncResult.Conflict actualVersion, m ->
+                log |> Log.prop "actualVersion" actualVersion, Log.WriteConflict m
+            | EsSyncResult.Written x, m ->
+                log |> Log.prop "tableKey" x, Log.WriteSuccess m
+        (resultLog |> Log.event evt).Information("Ges{action:l} count={count} conflict={conflict}",
+            "Write", events.Length, match evt with Log.WriteConflict _ -> true | _ -> false)
+        return result }
+
+    let writeEvents (log : ILogger) retryPolicy (conn : TableContext<EventStream>) (streamName : string) (version : int64) (events : EventData[])
+        : Async<EsSyncResult> =
+        let call = writeEventsLogged conn streamName version events
+        Log.withLoggedRetries retryPolicy "writeAttempt" call log
