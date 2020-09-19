@@ -5,10 +5,11 @@ module internal Equinox.Core.Infrastructure
 open FSharp.Control
 open System
 open System.Diagnostics
+open System.Threading.Tasks
 
 type OAttribute = System.Runtime.InteropServices.OptionalAttribute
 type DAttribute = System.Runtime.InteropServices.DefaultParameterValueAttribute
-    
+
 #if NET461
 module Array =
     let tryHead (array : 'T[]) =
@@ -42,51 +43,30 @@ type Async with
     /// </summary>
     /// <param name="task">Task to be awaited.</param>
     [<DebuggerStepThrough>]
-    static member AwaitTaskCorrect(task : System.Threading.Tasks.Task<'T>) : Async<'T> =
-        Async.FromContinuations(fun (sc,ec,_) ->
-            task.ContinueWith(fun (t : System.Threading.Tasks.Task<'T>) ->
+    static member AwaitTaskCorrect(task : Task<'T>) : Async<'T> =
+        Async.FromContinuations(fun (sc, ec, _) ->
+            task.ContinueWith(fun (t : Task<'T>) ->
                 if t.IsFaulted then
                     let e = t.Exception
                     if e.InnerExceptions.Count = 1 then ec e.InnerExceptions.[0]
                     else ec e
-                elif t.IsCanceled then ec(new System.Threading.Tasks.TaskCanceledException())
+                elif t.IsCanceled then ec(new TaskCanceledException())
                 else sc t.Result)
             |> ignore)
+
     [<DebuggerStepThrough>]
-    static member AwaitTaskCorrect(task : System.Threading.Tasks.Task) : Async<unit> =
-        Async.FromContinuations(fun (sc,ec,_) ->
-            task.ContinueWith(fun (task : System.Threading.Tasks.Task) ->
+    static member AwaitTaskCorrect(task : Task) : Async<unit> =
+        Async.FromContinuations(fun (sc, ec, _) ->
+            task.ContinueWith(fun (task : Task) ->
                 if task.IsFaulted then
                     let e = task.Exception
                     if e.InnerExceptions.Count = 1 then ec e.InnerExceptions.[0]
                     else ec e
                 elif task.IsCanceled then
-                    ec(System.Threading.Tasks.TaskCanceledException())
+                    ec(TaskCanceledException())
                 else
                     sc ())
             |> ignore)
-
-#if !NO_ASYNCSEQ
-module AsyncSeq =
-    /// Same as takeWhileAsync, but returns the final element too
-    let takeWhileInclusiveAsync p (source : AsyncSeq<'T>) : AsyncSeq<_> = asyncSeq {
-        use ie = source.GetEnumerator()
-        let! move = ie.MoveNext()
-        let b = ref move
-        while b.Value.IsSome do
-            let v = b.Value.Value
-            yield v
-            let! res = p v
-            if res then
-                let! moven = ie.MoveNext()
-                b := moven
-            else
-                b := None }
-
-    /// Same as takeWhile, but returns the final element too
-    let takeWhileInclusive p (source : AsyncSeq<'T>) =
-        takeWhileInclusiveAsync (p >> async.Return) source
-#endif
 
 [<RequireQualifiedAccess>]
 module Regex =

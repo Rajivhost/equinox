@@ -1,15 +1,19 @@
 ﻿module Backend.InventoryItem
 
+open Domain
 open Domain.InventoryItem
 
-type Service(log, resolve, ?maxAttempts) =
-
-    let resolve (Events.ForInventoryItemId id) = Equinox.Stream(log, resolve id, defaultArg maxAttempts 3)
+type Service internal (resolve : InventoryItemId -> Equinox.Stream<Events.Event, Fold.State>) =
 
     member __.Execute(itemId, command) =
         let stream = resolve itemId
-        stream.Transact(Commands.interpret command)
+        stream.Transact(interpret command)
 
     member __.Read(itemId) =
         let stream = resolve itemId
         stream.Query id
+
+let create resolve =
+    let resolve id =
+        Equinox.Stream(Serilog.Log.ForContext<Service>(), resolve (streamName id), maxAttempts = 3)
+    Service(resolve)

@@ -15,42 +15,42 @@ module Cart =
     let createServiceWithoutOptimization connection batchSize log =
         let store = createCosmosContext connection batchSize
         let resolve (id,opt) = Resolver(store, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.Unoptimized).Resolve(id,?option=opt)
-        Backend.Cart.Service(log, resolve)
+        Backend.Cart.create log resolve
     let projection = "Compacted",snd snapshot
     /// Trigger looking in Tip (we want those calls to occur, but without leaning on snapshots, which would reduce the paths covered)
     let createServiceWithEmptyUnfolds connection batchSize log =
         let store = createCosmosContext connection batchSize
         let unfArgs = Domain.Cart.Fold.isOrigin, fun _ -> Seq.empty
         let resolve (id,opt) = Resolver(store, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.MultiSnapshot unfArgs).Resolve(id,?option=opt)
-        Backend.Cart.Service(log, resolve)
+        Backend.Cart.create log resolve
     let createServiceWithSnapshotStrategy connection batchSize log =
         let store = createCosmosContext connection batchSize
         let resolve (id,opt) = Resolver(store, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.Snapshot snapshot).Resolve(id,?option=opt)
-        Backend.Cart.Service(log, resolve)
+        Backend.Cart.create log resolve
     let createServiceWithSnapshotStrategyAndCaching connection batchSize log cache =
         let store = createCosmosContext connection batchSize
         let sliding20m = CachingStrategy.SlidingWindow (cache, TimeSpan.FromMinutes 20.)
         let resolve (id,opt) = Resolver(store, codec, fold, initial, sliding20m, AccessStrategy.Snapshot snapshot).Resolve(id,?option=opt)
-        Backend.Cart.Service(log, resolve)
+        Backend.Cart.create log resolve
     let createServiceWithRollingState connection log =
         let store = createCosmosContext connection 1
         let access = AccessStrategy.RollingState Domain.Cart.Fold.snapshot
         let resolve (id,opt) = Resolver(store, codec, fold, initial, CachingStrategy.NoCaching, access).Resolve(id,?option=opt)
-        Backend.Cart.Service(log, resolve)
+        Backend.Cart.create log resolve
 
 module ContactPreferences =
     let fold, initial = Domain.ContactPreferences.Fold.fold, Domain.ContactPreferences.Fold.initial
     let codec = Domain.ContactPreferences.Events.codec
     let createServiceWithoutOptimization createGateway defaultBatchSize log _ignoreWindowSize _ignoreCompactionPredicate =
         let gateway = createGateway defaultBatchSize
-        let resolve = Resolver(gateway, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.Unoptimized).Resolve
-        Backend.ContactPreferences.Service(log, resolve)
+        let resolver = Resolver(gateway, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.Unoptimized)
+        Backend.ContactPreferences.create log resolver.Resolve
     let createService log createGateway =
-        let resolve = Resolver(createGateway 1, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.LatestKnownEvent).Resolve
-        Backend.ContactPreferences.Service(log, resolve)
+        let resolver = Resolver(createGateway 1, codec, fold, initial, CachingStrategy.NoCaching, AccessStrategy.LatestKnownEvent)
+        Backend.ContactPreferences.create log resolver.Resolve
     let createServiceWithLatestKnownEvent createGateway log cachingStrategy =
-        let resolve = Resolver(createGateway 1, codec, fold, initial, cachingStrategy, AccessStrategy.LatestKnownEvent).Resolve
-        Backend.ContactPreferences.Service(log, resolve)
+        let resolver = Resolver(createGateway 1, codec, fold, initial, cachingStrategy, AccessStrategy.LatestKnownEvent)
+        Backend.ContactPreferences.create log resolver.Resolve
 
 #nowarn "1182" // From hereon in, we may have some 'unused' privates (the tests)
 
@@ -59,11 +59,11 @@ type Tests(testOutputHelper) =
     let log,capture = base.Log, base.Capture
 
     let addAndThenRemoveItems optimistic exceptTheLastOne context cartId skuId (service: Backend.Cart.Service) count =
-        service.FlowAsync(cartId, optimistic, fun _ctx execute ->
+        service.ExecuteManyAsync(cartId, optimistic, seq {
             for i in 1..count do
-                execute <| Domain.Cart.AddItem (context, skuId, i)
+                yield Domain.Cart.SyncItem (context, skuId, Some i, None)
                 if not exceptTheLastOne || i <> count then
-                    execute <| Domain.Cart.RemoveItem (context, skuId) )
+                    yield Domain.Cart.SyncItem (context, skuId, Some 0, None) })
     let addAndThenRemoveItemsManyTimes context cartId skuId service count =
         addAndThenRemoveItems false false context cartId skuId service count
     let addAndThenRemoveItemsManyTimesExceptTheLastOne context cartId skuId service count =
@@ -79,21 +79,21 @@ type Tests(testOutputHelper) =
     let ``Can roundtrip against Cosmos, correctly batching the reads [without reading the Tip]`` context skuId = Async.RunSynchronously <| async {
         let! conn = connectToSpecifiedCosmosOrSimulator log
 
-        let maxItemsPerRequest = 2
+        let maxItemsPerRequest = 5
         let service = Cart.createServiceWithoutOptimization conn maxItemsPerRequest log
         capture.Clear() // for re-runs of the test
 
         let cartId = % Guid.NewGuid()
         // The command processing should trigger only a single read and a single write call
-        let addRemoveCount = 2
+        let addRemoveCount = 40
         let eventsPerAction = addRemoveCount * 2 - 1
         let transactions = 6
         for i in [1..transactions] do
             do! addAndThenRemoveItemsManyTimesExceptTheLastOne context cartId skuId service addRemoveCount
             // Extra roundtrip required after maxItemsPerRequest is exceeded
-            let expectedBatchesOf2Items = (i-1) / maxItemsPerRequest + 1
-            test <@ i = i && List.replicate expectedBatchesOf2Items EqxAct.ResponseBackward @ [EqxAct.QueryBackward; EqxAct.Append] = capture.ExternalCalls @>
-            verifyRequestChargesMax 48 // 47.29
+            let expectedBatchesOfItems = max 1 ((i-1) / maxItemsPerRequest)
+            test <@ i = i && List.replicate expectedBatchesOfItems EqxAct.ResponseBackward @ [EqxAct.QueryBackward; EqxAct.Append] = capture.ExternalCalls @>
+            verifyRequestChargesMax 61 // 57.09 [5.24 + 54.78] // 5.5 observed for read
             capture.Clear()
 
         // Validate basic operation; Key side effect: Log entries will be emitted to `capture`
@@ -103,7 +103,7 @@ type Tests(testOutputHelper) =
 
         let expectedResponses = transactions/maxItemsPerRequest + 1
         test <@ List.replicate expectedResponses EqxAct.ResponseBackward @ [EqxAct.QueryBackward] = capture.ExternalCalls @>
-        verifyRequestChargesMax 12 // 11.8
+        verifyRequestChargesMax 11 // 10.01
     }
 
     [<AutoData(MaxTest = 2, SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_COSMOS")>]
@@ -129,8 +129,7 @@ type Tests(testOutputHelper) =
                     return Some (skuId, addRemoveCount) }
 
         let act prepare (service : Backend.Cart.Service) skuId count =
-            service.FlowAsync(cartId, false, prepare = prepare, flow = fun _ctx execute ->
-                execute <| Domain.Cart.AddItem (context, skuId, count))
+            service.ExecuteManyAsync(cartId, false, prepare = prepare, commands = [Domain.Cart.SyncItem (context, skuId, Some count, None)])
 
         let eventWaitSet () = let e = new ManualResetEvent(false) in (Async.AwaitWaitHandle e |> Async.Ignore), async { e.Set() |> ignore }
         let w0, s0 = eventWaitSet ()
@@ -198,19 +197,19 @@ type Tests(testOutputHelper) =
         let! conn = connectToSpecifiedCosmosOrSimulator log
         let service = ContactPreferences.createService log (createCosmosContext conn)
 
-        let email = let g = System.Guid.NewGuid() in g.ToString "N"
+        let id = ContactPreferences.Id (let g = System.Guid.NewGuid() in g.ToString "N")
         //let (Domain.ContactPreferences.Id email) = id ()
         // Feed some junk into the stream
         for i in 0..11 do
             let quickSurveysValue = i % 2 = 0
-            do! service.Update email { value with quickSurveys = quickSurveysValue }
+            do! service.Update(id, { value with quickSurveys = quickSurveysValue })
         // Ensure there will be something to be changed by the Update below
-        do! service.Update email { value with quickSurveys = not value.quickSurveys }
+        do! service.Update(id, { value with quickSurveys = not value.quickSurveys })
 
         capture.Clear()
-        do! service.Update email value
+        do! service.Update(id, value)
 
-        let! result = service.Read email
+        let! result = service.Read id
         test <@ value = result @>
 
         test <@ [EqxAct.Tip; EqxAct.Append; EqxAct.Tip] = capture.ExternalCalls @>
@@ -221,24 +220,24 @@ type Tests(testOutputHelper) =
         let! conn = connectToSpecifiedCosmosOrSimulator log
         let service = ContactPreferences.createServiceWithLatestKnownEvent (createCosmosContext conn) log CachingStrategy.NoCaching
 
-        let email = let g = System.Guid.NewGuid() in g.ToString "N"
+        let id = ContactPreferences.Id (let g = System.Guid.NewGuid() in g.ToString "N")
         // Feed some junk into the stream
         for i in 0..11 do
             let quickSurveysValue = i % 2 = 0
-            do! service.Update email { value with quickSurveys = quickSurveysValue }
+            do! service.Update(id, { value with quickSurveys = quickSurveysValue })
         // Ensure there will be something to be changed by the Update below
-        do! service.Update email { value with quickSurveys = not value.quickSurveys }
+        do! service.Update(id, { value with quickSurveys = not value.quickSurveys })
 
         capture.Clear()
-        do! service.Update email value
+        do! service.Update(id, value)
 
-        let! result = service.Read email
+        let! result = service.Read id
         test <@ value = result @>
 
         test <@ [EqxAct.Tip; EqxAct.Append; EqxAct.Tip] = capture.ExternalCalls @>
     }
 
-     [<AutoData(MaxTest = 2, SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_COSMOS")>]
+    [<AutoData(MaxTest = 2, SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_COSMOS")>]
     let ``Can roundtrip Cart against Cosmos with RollingUnfolds, detecting conflicts based on _etag`` ctx initialState = Async.RunSynchronously <| async {
         let log1, capture1 = log, capture
         capture1.Clear()
@@ -259,8 +258,7 @@ type Tests(testOutputHelper) =
                     return Some (skuId, addRemoveCount) }
 
         let act prepare (service : Backend.Cart.Service) skuId count =
-            service.FlowAsync(cartId, false, prepare = prepare, flow = fun _ctx execute ->
-                execute <| Domain.Cart.AddItem (context, skuId, count))
+            service.ExecuteManyAsync(cartId, false, prepare = prepare, commands = [Domain.Cart.SyncItem (context, skuId, Some count, None)])
 
         let eventWaitSet () = let e = new ManualResetEvent(false) in (Async.AwaitWaitHandle e |> Async.Ignore), async { e.Set() |> ignore }
         let w0, s0 = eventWaitSet ()

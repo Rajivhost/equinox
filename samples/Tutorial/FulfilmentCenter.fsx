@@ -1,11 +1,14 @@
-#I "bin/Debug/netstandard2.0/"
+#I "bin/Debug/netstandard2.1/"
 #r "Serilog.dll"
 #r "Serilog.Sinks.Console.dll"
 #r "Newtonsoft.Json.dll"
 #r "TypeShape.dll"
 #r "Equinox.dll"
+#r "Equinox.Core.dll"
+#r "FSharp.UMX.dll"
+#r "FSCodec.dll"
 #r "FsCodec.NewtonsoftJson.dll"
-#r "Microsoft.Azure.DocumentDb.Core.dll"
+#r "Microsoft.Azure.Cosmos.Client.dll"
 #r "System.Net.Http"
 #r "Serilog.Sinks.Seq.dll"
 #r "Equinox.Cosmos.dll"
@@ -37,6 +40,8 @@ module Types =
 
 module FulfilmentCenter =
 
+    let streamName id = FsCodec.StreamName.create "FulfilmentCenter" id
+
     module Events =
 
         type AddressData = { address : Address }
@@ -50,7 +55,6 @@ module FulfilmentCenter =
             | FcRenamed of FcName
             interface TypeShape.UnionContract.IUnionContract
         let codec = FsCodec.NewtonsoftJson.Codec.Create<Event>()
-        let (|ForFcId|) id = Equinox.AggregateId("FulfilmentCenter", id)
 
     module Fold =
 
@@ -80,9 +84,7 @@ module FulfilmentCenter =
         | UpdateDetails c when state.details = Some c -> []
         | UpdateDetails c -> [Events.FcDetailsChanged { details = c }]
 
-    type Service(log, reesolve, ?maxAttempts) =
-
-        let resolve (Events.ForFcId streamId) = Equinox.Stream(log, resolve streamId, defaultArg maxAttempts 3)
+    type Service internal (resolve : string -> Equinox.Stream<Events.Event, Fold.State>) =
 
         let execute fc command : Async<unit> =
             let stream = resolve fc
@@ -92,7 +94,7 @@ module FulfilmentCenter =
             stream.Query id
         let queryEx fc (projection : Fold.State -> 't) : Async<int64*'t> =
             let stream = resolve fc
-            stream.QueryEx(fun v s -> v, projection s)
+            stream.QueryEx(fun c -> c.Version, projection c.State)
 
         member __.UpdateName(id, value) = execute id (Register value)
         member __.UpdateAddress(id, value) = execute id (UpdateAddress value)
@@ -131,8 +133,9 @@ module Store =
 
 open FulfilmentCenter
 
-let resolve = Resolver(Store.context, Events.codec, Fold.fold, Fold.initial, Store.cacheStrategy).Resolve
-let service = Service(Log.log, resolve)
+let resolver = Resolver(Store.context, Events.codec, Fold.fold, Fold.initial, Store.cacheStrategy, AccessStrategy.Unoptimized)
+let resolve id = Equinox.Stream(Log.log, resolver.Resolve(streamName id), maxAttempts = 3)
+let service = Service(resolve)
 
 let fc = "fc0"
 service.UpdateName(fc, { code="FC000"; name="Head" }) |> Async.RunSynchronously
@@ -143,15 +146,17 @@ Log.dumpMetrics ()
 /// Manages ingestion of summary events tagged with the version emitted from FulmentCenter.Service.QueryWithVersion
 module FulfilmentCenterSummary =
 
+    let streamName id = FsCodec.StreamName.create "FulfilmentCenterSummary" id
+
     module Events =
         type UpdatedData = { version : int64; state : Summary }
         type Event =
             | Updated of UpdatedData
             interface TypeShape.UnionContract.IUnionContract
         let codec = FsCodec.NewtonsoftJson.Codec.Create<Event>()
-        let (|ForFcId|) id = Equinox.AggregateId("FulfilmentCenterSummary", id)
 
-    type State = { version : int64; state : Types.Summary }
+    type StateSummary = { version : int64; state : Types.Summary }
+    type State = StateSummary option
     let initial = None
     let evolve _state = function
         | Events.Updated v -> Some v
@@ -159,14 +164,12 @@ module FulfilmentCenterSummary =
 
     type Command =
         | Update of version : int64 * Types.Summary
-    let interpret command (state : State option) =
+    let interpret command (state : State) =
         match command with
-        | Update (uv,us) when state |> Option.exists (fun s -> s.version > uv) -> []
+        | Update (uv,_us) when state |> Option.exists (fun s -> s.version > uv) -> []
         | Update (uv,us) -> [Events.Updated { version = uv; state = us }]
 
-    type Service(log, resolve, ?maxAttempts) =
-
-        let resolve (Events.ForFcId streamId) = Equinox.Stream(log, resolve streamId, defaultArg maxAttempts 3)
+    type Service internal (resolve : string -> Equinox.Stream<Events.Event, State>) =
 
         let execute fc command : Async<unit> =
             let stream = resolve fc

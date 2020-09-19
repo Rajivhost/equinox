@@ -2,8 +2,6 @@
 
 open Equinox
 open Equinox.Cosmos.Integration
-open Equinox.EventStore
-open Equinox.MemoryStore
 open Swensen.Unquote
 
 #nowarn "1182" // From hereon in, we may have some 'unused' privates (the tests)
@@ -11,16 +9,14 @@ open Swensen.Unquote
 let fold, initial = Domain.Cart.Fold.fold, Domain.Cart.Fold.initial
 let snapshot = Domain.Cart.Fold.isOrigin, Domain.Cart.Fold.snapshot
 
-let createMemoryStore () =
-    // we want to validate that the JSON UTF8 is working happily
-    new VolatileStore<byte[]>()
+let createMemoryStore () = MemoryStore.VolatileStore<byte[]>()
 let createServiceMemory log store =
-    Backend.Cart.Service(log, fun (id,opt) -> MemoryStore.Resolver(store, Domain.Cart.Events.codec, fold, initial).Resolve(id,?option=opt))
+    Backend.Cart.create log (fun (id,opt) -> MemoryStore.Resolver(store, Domain.Cart.Events.codec, fold, initial).Resolve(id,?option=opt))
 
 let codec = Domain.Cart.Events.codec
 
 let resolveGesStreamWithRollingSnapshots gateway =
-    fun (id,opt) -> EventStore.Resolver(gateway, codec, fold, initial, access = AccessStrategy.RollingSnapshots snapshot).Resolve(id,?option=opt)
+    fun (id,opt) -> EventStore.Resolver(gateway, codec, fold, initial, access = EventStore.AccessStrategy.RollingSnapshots snapshot).Resolve(id,?option=opt)
 let resolveGesStreamWithoutCustomAccessStrategy gateway =
     fun (id,opt) -> EventStore.Resolver(gateway, codec, fold, initial).Resolve(id,?option=opt)
 
@@ -30,11 +26,11 @@ let resolveCosmosStreamWithoutCustomAccessStrategy gateway =
     fun (id,opt) -> Cosmos.Resolver(gateway, codec, fold, initial, Cosmos.CachingStrategy.NoCaching, Cosmos.AccessStrategy.Unoptimized).Resolve(id,?option=opt)
 
 let addAndThenRemoveItemsManyTimesExceptTheLastOne context cartId skuId (service: Backend.Cart.Service) count =
-    service.FlowAsync(cartId, false, fun _ctx execute ->
+    service.ExecuteManyAsync(cartId, false, seq {
         for i in 1..count do
-            execute <| Domain.Cart.AddItem (context, skuId, i)
+            yield Domain.Cart.SyncItem (context, skuId, Some i, None)
             if i <> count then
-                execute <| Domain.Cart.RemoveItem (context, skuId))
+                yield Domain.Cart.SyncItem (context, skuId, Some 0, None) })
 
 type Tests(testOutputHelper) =
     let testOutput = TestOutputAdapter testOutputHelper
@@ -58,7 +54,7 @@ type Tests(testOutputHelper) =
         let log = createLog ()
         let! conn = connect log
         let gateway = choose conn defaultBatchSize
-        return Backend.Cart.Service(log, resolve gateway) }
+        return Backend.Cart.create log (resolve gateway) }
 
     [<AutoData(SkipIfRequestedViaEnvironmentVariable="EQUINOX_INTEGRATION_SKIP_EVENTSTORE")>]
     let ``Can roundtrip against EventStore, correctly folding the events without compaction semantics`` args = Async.RunSynchronously <| async {

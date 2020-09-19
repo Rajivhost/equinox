@@ -10,25 +10,89 @@ The `Unreleased` section name is replaced by the expected version of next releas
 
 ### Added
 
-- `eqx dump` perf + logging improvements
-- `eqx dump -P` turns off JSON pretty printing
-- `Cosmos`: `Tip 200` now logs received `n` and `_etag` values
+- now targets `Microsoft.Azure.Cosmos` v `3.9.0` (instead of `Microsoft.Azure.DocumentDB`[`.Core`] v 2.x) [#144](https://github.com/jet/equinox/pull/144)
 
 ### Changed
 
-- Update to `Microsoft.SourceLink.GitHub` v `1.0.0`
-- Samples etc target `Argu` v `6.0.0`
-- `eqx dump`'s `-J` switch now turns off JSON rendering
-- `eqx -vc dump` now renders Store `.Information` logs
-- Samples consistently use `module Fold`, `(Events.ForX streamId)`, removed `(|Stream|)`  [#174](https://github.com/jet/equinox/pull/174) 
+- Update to `3.1.101` SDK
+- Retarget `netcoreapp2.1` apps to `netcoreapp3.1` with `SystemTextJson`
+- Retarget Todobackend to `aspnetcore` v `3.1`
+- Target `FSharp.Control.AsyncSeq` v `2.0.23`
+- Updated AzDO CI/CD to use `windows-latest`
+- Remove `module Commands` convention from in examples
+- Revise semantics of Cart Sample Command handling
+- `Cosmos:` Removed [warmup call](https://github.com/Azure/azure-cosmos-dotnet-v3/issues/1436)
 
 ### Removed
+### Fixed
+
+<a name="2.1.0"></a>
+## [2.1.0] - 2020-05-22
+
+### Added
+
+- Add `eqx dump -b`, enabling overriding of Max Events per Batch
+- `MemoryStore`: Add `Committed` event to enable simulating Change Feeds in integration tests re [#205](https://github.com/jet/equinox/issues/205) [#221](https://github.com/jet/equinox/pull/221)
+
+### Changed
+
+- `MemoryStore`: Target `FsCodec` v `2.0.0` [#219](https://github.com/jet/equinox/pull/219)
+
+<a name="2.0.2"></a>
+## [2.0.2] - 2020-05-10
+
+- _Rebuilt version of `2.0.1` with new VM image in order to release complete set of nupkg files vs only releasing MsSql_
+
+<a name="2.0.1"></a>
+## [2.0.1] - 2020-03-25 - unlisted due to incomplete package set
+
+### Fixed
+
+- `SqlStreamStore.MsSql`: Initial Append when stream empty on MsSql was perpetually failing [#209](https://github.com/jet/equinox/pull/209) :pray: [@Kimserey](https://github.com/kimserey)
+
+<a name="2.0.0"></a>
+## [2.0.0] - 2020-02-19
+
+### Added
+
+- `Stream.TransactAsyncEx`, exposing the `Core.ISyncContext` at conclusion of the sync operation, affording the ability to examine the post-state `Version` etc. (This paves the way for exposing [`SessionToken`](https://github.com/jet/equinox/issues/192) at a later point without a breaking change) [#194](https://github.com/jet/equinox/pull/194)
+
+### Changed
+
+- `Stream.QueryEx` to supply `Core.ISyncContext` in lieu of only exposing `Version` (to align with `TransactAsyncEx`) [#194](https://github.com/jet/equinox/pull/194)
+- Target `FsCodec` v `2.0.0`
+
+<a name="2.0.0-rc9"></a>
+## [2.0.0-rc9] - 2020-01-31
+
+### Added
+
+- `eqx dump` perf + logging improvements
+- `eqx dump -P` turns off JSON pretty printing
+- `Cosmos`: `Tip 200` now logs received `n` and `_etag` values
+- `Cosmos`: Unfolds now write and return `t` (creation `DateTimeOffset.UtcNow`)
+- `EventStore`: Add missing optional parameters for `Connector`: `gossipTimeout` and `clientConnectionTimeout` [#186](https://github.com/jet/equinox/pull/186) :pray: [@AndrewRublyov](https://github.com/AndrewRublyov)
+
+### Changed
+
+- `SqlStreamStore`.*: Target `SqlStreamStore` v `1.2.0-beta.8`
+- Target `FsCodec` v `2.0.0-rc3`
+- Target `Microsoft.SourceLink.GitHub`, `Microsoft.NETFramework.ReferenceAssemblies` v `1.0.0`
+- Samples etc target `Argu` v `6.0.0`
+- `eqx dump`'s `-J` switch now turns off JSON rendering
+- `eqx -C dump` now renders Store `.Information` logs
+- Samples consistently use `module Fold`, `(Events.ForX streamId)`, removed `(|Stream|)` [#174](https://github.com/jet/equinox/pull/174)
+
+### Removed
+
+- `Accumulator` [#184](https://github.com/jet/equinox/pull/184)
+- `Target` (now uses `FsCodec.StreamName`) [#189](https://github.com/jet/equinox/pull/189)
+
 ### Fixed
 
 - `eqx`: Reinstated writing of missing commandline argument messages to console
 - `Cosmos`: Fix `null` Data handling exception when log level <= `Debug`
 
-<a name="2.0.0"></a>
 <a name="2.0.0-rc8"></a>
 ## [2.0.0-rc8] - 2019-11-14
 
@@ -340,7 +404,12 @@ The `Unreleased` section name is replaced by the expected version of next releas
 
 (For information pertaining to earlier releases, see release notes in https://github.com/jet/equinox/releases and/or can someone please add it!)
 
-[Unreleased]: https://github.com/jet/equinox/compare/2.0.0-rc8...HEAD
+[Unreleased]: https://github.com/jet/equinox/compare/2.1.0...HEAD
+[2.1.0]: https://github.com/jet/equinox/compare/2.0.2...2.1.0
+[2.0.2]: https://github.com/jet/equinox/compare/2.0.1...2.0.2
+[2.0.1]: https://github.com/jet/equinox/compare/2.0.0...2.0.1
+[2.0.0]: https://github.com/jet/equinox/compare/2.0.0-rc9...2.0.0
+[2.0.0-rc9]: https://github.com/jet/equinox/compare/2.0.0-rc8...2.0.0-rc9
 [2.0.0-rc8]: https://github.com/jet/equinox/compare/2.0.0-rc7...2.0.0-rc8
 [2.0.0-rc7]: https://github.com/jet/equinox/compare/2.0.0-rc6...2.0.0-rc7
 [2.0.0-rc6]: https://github.com/jet/equinox/compare/2.0.0-rc5...2.0.0-rc6

@@ -1,7 +1,10 @@
 ﻿module Domain.Favorites
 
+let streamName (id: ClientId) = FsCodec.StreamName.create "Favorites" (ClientId.toString id)
+
 // NOTE - these types and the union case names reflect the actual storage formats and hence need to be versioned with care
 module Events =
+
     type Favorited =                            { date: System.DateTimeOffset; skuId: SkuId }
     type Unfavorited =                          { skuId: SkuId }
     type Snapshotted =                          { net: Favorited[] }
@@ -12,9 +15,9 @@ module Events =
         | Unfavorited                           of Unfavorited
         interface TypeShape.UnionContract.IUnionContract
     let codec = FsCodec.NewtonsoftJson.Codec.Create<Event>()
-    let (|ForClientId|) (id: ClientId) = Equinox.AggregateId("Favorites", ClientId.toStringN id)
 
 module Fold =
+
     type State = Events.Favorited []
 
     type private InternalState(input: State) =
@@ -43,14 +46,13 @@ type Command =
     | Favorite      of date : System.DateTimeOffset * skuIds : SkuId list
     | Unfavorite    of skuId : SkuId
 
-module Commands =
-    let interpret command (state : Fold.State) =
-        let doesntHave skuId = state |> Array.exists (fun x -> x.skuId = skuId) |> not
-        match command with
-        | Favorite (date = date; skuIds = skuIds) ->
-            [ for skuId in Seq.distinct skuIds do
-                if doesntHave skuId then
-                    yield Events.Favorited { date = date; skuId = skuId } ]
-        | Unfavorite skuId ->
-            if doesntHave skuId then [] else
-            [ Events.Unfavorited { skuId = skuId } ]
+let interpret command (state : Fold.State) =
+    let doesntHave skuId = state |> Array.exists (fun x -> x.skuId = skuId) |> not
+    match command with
+    | Favorite (date = date; skuIds = skuIds) ->
+        [ for skuId in Seq.distinct skuIds do
+            if doesntHave skuId then
+                yield Events.Favorited { date = date; skuId = skuId } ]
+    | Unfavorite skuId ->
+        if doesntHave skuId then [] else
+        [ Events.Unfavorited { skuId = skuId } ]

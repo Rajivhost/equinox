@@ -2,16 +2,16 @@ namespace Web
 
 open Argu
 open Microsoft.AspNetCore.Builder
-open Microsoft.AspNetCore.Hosting
 open Microsoft.AspNetCore.Mvc
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Hosting
 open Samples.Infrastructure
 open Serilog
 open Serilog.Events
 
 [<NoComparison>]
 type Arguments =
-    | [<AltCommandLine "-vc">]                                VerboseConsole
+    | [<AltCommandLine "-V">]                                 Verbose
     | [<AltCommandLine "-S">]                                 LocalSeq
     | [<AltCommandLine "-C">]                                 Cached
     | [<AltCommandLine "-U">]                                 Unfolds
@@ -23,7 +23,7 @@ type Arguments =
     | [<CliPrefix(CliPrefix.None); Last; AltCommandLine "pg">]  Postgres of ParseResults<Storage.Sql.Pg.Arguments>
     interface IArgParserTemplate with
         member a.Usage = a |> function
-            | VerboseConsole ->             "Include low level Domain and Store logging in screen output."
+            | Verbose ->                    "Include low level Domain and Store logging in screen output."
             | LocalSeq ->                   "configures writing to a local Seq endpoint at http://localhost:5341, see https://getseq.net"
             | Cached ->                     "employ a 50MB cache."
             | Unfolds ->                    "employ a store-appropriate Rolling Snapshots and/or Unfolding strategy."
@@ -40,14 +40,22 @@ type App = class end
 type Startup() =
     // This method gets called by the runtime. Use this method to add services to the container.
     static member ConfigureServices(services: IServiceCollection, args: ParseResults<Arguments>) : unit =
-        services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_1) |> ignore
+        services
+            .AddMvc()
+            .AddJsonOptions(fun o ->
+                // NOTE this is technically superfluous as we don't use `option`s in the models at present
+                // The key side-effect we want to guarantee is that we reference `FsCodec.SystemTextJson`,
+                // which will trigger a dependency on `System.Text.Json` >= `5.0.0-preview.3`
+                // This makes F# records roundtrip (System.Text.Json v4 required parameterless constructors on records)
+                o.JsonSerializerOptions.Converters.Add(FsCodec.SystemTextJson.Converters.JsonOptionConverter()))
+            .SetCompatibilityVersion(CompatibilityVersion.Latest) |> ignore
 
-        let verboseConsole = args.Contains VerboseConsole
+        let verbose = args.Contains Verbose
         let maybeSeq = if args.Contains LocalSeq then Some "http://localhost:5341" else None
         let createStoreLog verboseStore =
             let c = LoggerConfiguration().Destructure.FSharpTypes()
             let c = if verboseStore then c.MinimumLevel.Debug() else c
-            let c = c.WriteTo.Console((if verboseStore && verboseConsole then LogEventLevel.Debug else LogEventLevel.Warning), theme = Sinks.SystemConsole.Themes.AnsiConsoleTheme.Code)
+            let c = c.WriteTo.Console((if verboseStore && verbose then LogEventLevel.Debug else LogEventLevel.Warning), theme = Sinks.SystemConsole.Themes.AnsiConsoleTheme.Code)
             let c = match maybeSeq with None -> c | Some endpoint -> c.WriteTo.Seq(endpoint)
             c.CreateLogger() :> ILogger
 
@@ -82,10 +90,12 @@ type Startup() =
         Services.register(services, storeConfig, storeLog)
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-    static member Configure(app: IApplicationBuilder, env: IHostingEnvironment) : unit =
+    static member Configure(app: IApplicationBuilder, env: IHostEnvironment) : unit =
         if env.IsDevelopment() then app.UseDeveloperExceptionPage() |> ignore
         else app.UseHsts() |> ignore
 
-        app.UseHttpsRedirection()
-            .UseCors(fun x -> x.WithOrigins([|"https://www.todobackend.com"|]).AllowAnyHeader().AllowAnyMethod() |> ignore)
-            .UseMvc() |> ignore
+        app
+            .UseHttpsRedirection()
+            .UseCors(fun x -> x.WithOrigins("https://www.todobackend.com").AllowAnyHeader().AllowAnyMethod() |> ignore)
+            .UseRouting()
+            .UseEndpoints(fun endpoints -> endpoints.MapControllers() |> ignore) |> ignore

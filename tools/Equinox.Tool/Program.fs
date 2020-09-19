@@ -3,6 +3,7 @@
 open Argu
 open Domain.Infrastructure
 open Equinox.Tool.Infrastructure
+open FSharp.Control
 open FSharp.UMX
 open Microsoft.Extensions.DependencyInjection
 open Samples.Infrastructure
@@ -16,8 +17,8 @@ let [<Literal>] appName = "equinox-tool"
 
 [<NoEquality; NoComparison>]
 type Arguments =
-    | [<AltCommandLine "-v">]               Verbose
-    | [<AltCommandLine "-vc">]              VerboseConsole
+    | [<AltCommandLine "-V">]               Verbose
+    | [<AltCommandLine "-C">]               VerboseConsole
     | [<AltCommandLine "-S">]               LocalSeq
     | [<AltCommandLine "-l">]               LogFile of string
     | [<CliPrefix(CliPrefix.None); Last>]     Run of ParseResults<TestArguments>
@@ -40,7 +41,7 @@ and [<NoComparison; NoEquality>]InitArguments =
     | [<AltCommandLine "-ru"; Mandatory>]   Rus of int
     | [<AltCommandLine "-D">]               Shared
     | [<AltCommandLine "-P">]               SkipStoredProc
-    | [<CliPrefix(CliPrefix.None)>]           Cosmos   of ParseResults<Storage.Cosmos.Arguments>
+    | [<CliPrefix(CliPrefix.None)>]         Cosmos of ParseResults<Storage.Cosmos.Arguments>
     interface IArgParserTemplate with
         member a.Usage = a |> function
             | Rus _ ->                      "Specify RU/s level to provision for the Container."
@@ -61,7 +62,7 @@ and [<NoComparison; NoEquality>]StatsArguments =
     | [<AltCommandLine "-S"; Unique>]       Streams
     | [<AltCommandLine "-D"; Unique>]       Documents
     | [<AltCommandLine "-P"; Unique>]       Parallel
-    | [<CliPrefix(CliPrefix.None)>]           Cosmos   of ParseResults<Storage.Cosmos.Arguments>
+    | [<CliPrefix(CliPrefix.None)>]         Cosmos of ParseResults<Storage.Cosmos.Arguments>
     interface IArgParserTemplate with
         member a.Usage = a |> function
             | Events _ ->                   "Count the number of Events in the store."
@@ -70,13 +71,14 @@ and [<NoComparison; NoEquality>]StatsArguments =
             | Parallel _ ->                 "Run in Parallel (CAREFUL! can overwhelm RU allocations)."
             | Cosmos _ ->                   "Cosmos Connection parameters."
 and [<NoComparison; NoEquality>]DumpArguments =
-    | [<AltCommandLine "-s">]               Stream of string
+    | [<AltCommandLine "-s">]               Stream of FsCodec.StreamName
     | [<AltCommandLine "-C"; Unique>]       Correlation
     | [<AltCommandLine "-J"; Unique>]       JsonSkip
     | [<AltCommandLine "-P"; Unique>]       PrettySkip
     | [<AltCommandLine "-T"; Unique>]       TimeRegular
     | [<AltCommandLine "-U"; Unique>]       UnfoldsOnly
     | [<AltCommandLine "-E"; Unique >]      EventsOnly
+    | [<AltCommandLine "-b"; Unique >]      BatchSize of int
     | [<CliPrefix(CliPrefix.None)>]                            Cosmos   of ParseResults<Storage.Cosmos.Arguments>
     | [<CliPrefix(CliPrefix.None); Last>]                      Es       of ParseResults<Storage.EventStore.Arguments>
     | [<CliPrefix(CliPrefix.None); Last; AltCommandLine "ms">] MsSql    of ParseResults<Storage.Sql.Ms.Arguments>
@@ -91,6 +93,7 @@ and [<NoComparison; NoEquality>]DumpArguments =
             | TimeRegular ->                "Don't humanize time intervals between events"
             | UnfoldsOnly ->                "Exclude Events. Default: show both Events and Unfolds"
             | EventsOnly ->                 "Exclude Unfolds/Snapshots. Default: show both Events and Unfolds."
+            | BatchSize _ ->                "Maximum number of documents to request per batch. Default 1000."
             | Es _ ->                       "Parameters for EventStore."
             | Cosmos _ ->                   "Parameters for CosmosDb."
             | MsSql _ ->                    "Parameters for Sql Server."
@@ -98,7 +101,7 @@ and [<NoComparison; NoEquality>]DumpArguments =
             | Postgres _ ->                 "Parameters for Postgres."
 and DumpInfo(args: ParseResults<DumpArguments>) =
     member __.ConfigureStore(log : ILogger, createStoreLog) =
-        let storeConfig = None,true,1000
+        let storeConfig = None, true, args.GetResult(DumpArguments.BatchSize,1000)
         match args.TryGetSubCommand() with
         | Some (DumpArguments.Cosmos sargs) ->
             let storeLog = createStoreLog <| sargs.Contains Storage.Cosmos.Arguments.VerboseStore
@@ -265,7 +268,7 @@ module LoadTest =
             | None, None -> invalidOp "impossible None, None"
         let clients = Array.init (a.TestsPerSecond * 2) (fun _ -> % Guid.NewGuid())
 
-        let renderedIds = clients |> Seq.map ClientId.toStringN |> if verboseConsole then id else Seq.truncate 5
+        let renderedIds = clients |> Seq.map ClientId.toString |> if verboseConsole then id else Seq.truncate 5
         log.ForContext((if verboseConsole then "clientIds" else "clientIdsExcerpt"),renderedIds)
             .Information("Running {test} for {duration} @ {tps} hits/s across {clients} clients; Max errors: {errorCutOff}, reporting intervals: {ri}, report file: {report}",
             test, a.Duration, a.TestsPerSecond, clients.Length, a.ErrorCutoff, a.ReportingIntervals, reportFilename)
@@ -334,11 +337,10 @@ module SqlInit =
         | _ -> failwith "please specify a `ms`,`my` or `pg` endpoint" }
 
 module CosmosStats =
-    type Equinox.Cosmos.Store.Container with
+    type Microsoft.Azure.Cosmos.Container with
         // NB DO NOT CONSIDER PROMULGATING THIS HACK
-        member container.QueryValue<'T>(sqlQuery : string, ?options) =
-            let options = defaultArg options null
-            let query : seq<'T> = container.Client.CreateDocumentQuery<'T>(container.CollectionUri, sqlExpression = sqlQuery, feedOptions = options) :> _
+        member container.QueryValue<'T>(sqlQuery : string) =
+            let query : Microsoft.Azure.Cosmos.FeedResponse<'T> = container.GetItemQueryIterator<'T>(sqlQuery).ReadNextAsync() |> Async.AwaitTaskCorrect |> Async.RunSynchronously
             query |> Seq.exactlyOne
     let run (log : ILogger, verboseConsole, maybeSeq) (args : ParseResults<StatsArguments>) = async {
         match args.TryGetSubCommand() with
@@ -347,7 +349,7 @@ module CosmosStats =
             let doS = doS || (not doD && not doE) // default to counting streams only unless otherwise specified
             let inParallel = args.Contains Parallel
             let! _storeLog,conn,dName,cName = CosmosInit.conn (log,verboseConsole,maybeSeq) sargs
-            let container = Equinox.Cosmos.Store.Container(conn.Client,dName,cName)
+            let container = conn.Client.GetContainer(dName, cName)
             let ops =
                 [   if doS then yield "Streams",   """SELECT VALUE COUNT(1) FROM c WHERE c.id="-1" """
                     if doD then yield "Documents", """SELECT VALUE COUNT(1) FROM c"""
@@ -355,9 +357,9 @@ module CosmosStats =
             log.Information("Computing {measures} ({mode})", Seq.map fst ops, (if inParallel then "in parallel" else "serially"))
             ops |> Seq.map (fun (name,sql) -> async {
                     log.Debug("Running query: {sql}", sql)
-                    let res = container.QueryValue<int>(sql, Microsoft.Azure.Documents.Client.FeedOptions(EnableCrossPartitionQuery=true))
+                    let res = container.QueryValue<int>(sql)
                     log.Information("{stat}: {result:N0}", name, res)})
-                |> if inParallel then Async.Parallel else Async.ParallelThrottled 1 // TOCONSIDER replace with Async.Sequence when using new enough FSharp.Core
+                |> if inParallel then Async.Parallel else Async.Sequential
                 |> Async.Ignore
                 |> Async.RunSynchronously
         | _ -> failwith "please specify a `cosmos` endpoint" }
@@ -388,10 +390,8 @@ module Dump =
                 | _ when doJ -> System.Text.Encoding.UTF8.GetString data |> Newtonsoft.Json.Linq.JObject.Parse |> fun x -> x.ToString fo
                 | _ -> sprintf "(%d chars)" (System.Text.Encoding.UTF8.GetString(data).Length)
             with e -> log.ForContext("str", System.Text.Encoding.UTF8.GetString data).Warning(e, "Parse failure"); reraise()
-        let readStream (name : string) = async {
-            let catAndId = name.Split([|'-'|],2,StringSplitOptions.RemoveEmptyEntries)
-            let id = match catAndId with [|cat;id|] -> Equinox.AggregateId(cat,id) | ids -> Equinox.StreamName ids.[0]
-            let stream = resolver.Resolve(idCodec,fold,initial,isOriginAndSnapshot) id
+        let readStream (streamName : FsCodec.StreamName) = async {
+            let stream = resolver.Resolve(idCodec,fold,initial,isOriginAndSnapshot) streamName
             let! _token,events = stream.Load storeLog
             let source = if not doE && not (List.isEmpty unfolds) then Seq.ofList unfolds else Seq.append events unfolds
             let mutable prevTs = None

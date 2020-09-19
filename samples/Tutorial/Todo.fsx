@@ -3,23 +3,27 @@
 #if VISUALSTUDIO
 #r "netstandard"
 #endif
-#I "bin/Debug/netstandard2.0/"
+#I "bin/Debug/netstandard2.1/"
 #r "Serilog.dll"
 #r "Serilog.Sinks.Console.dll"
 #r "Newtonsoft.Json.dll"
 #r "TypeShape.dll"
+#r "Equinox.Core.dll"
 #r "Equinox.dll"
+#r "FSharp.UMX.dll"
 #r "FsCodec.dll"
 #r "FsCodec.NewtonsoftJson.dll"
 #r "FSharp.Control.AsyncSeq.dll"
-#r "Microsoft.Azure.DocumentDb.Core.dll"
+#r "Microsoft.Azure.Cosmos.Client.dll"
 #r "Equinox.Cosmos.dll"
 
-open Equinox.Cosmos
 open System
 
 (* NB It's recommended to look at Favorites.fsx first as it establishes the groundwork
    This tutorial stresses different aspects *)
+
+let Category = "Todos"
+let streamName (id : string) = FsCodec.StreamName.create Category id
 
 type Todo =             { id: int; order: int; title: string; completed: bool }
 type DeletedInfo =      { id: int }
@@ -32,7 +36,6 @@ type Event =
     | Snapshotted       of Snapshotted
     interface TypeShape.UnionContract.IUnionContract
 let codec = FsCodec.NewtonsoftJson.Codec.Create<Event>()
-let (|ForClientId|) (id : string) = Equinox.AggregateId("Todos", id)
 
 type State = { items : Todo list; nextId : int }
 let initial = { items = []; nextId = 0 }
@@ -58,19 +61,17 @@ let interpret c (state : State) =
     | Delete id -> if state.items |> List.exists (fun x -> x.id = id) then [Deleted { id=id }] else []
     | Clear -> if state.items |> List.isEmpty then [] else [Cleared]
 
-type Service(log, resolve, ?maxAttempts) =
-
-    let resolve (ForClientId streamId) = Equinox.Stream(log, resolve streamId, defaultArg maxAttempts 3)
+type Service internal (resolve : string -> Equinox.Stream<Event, State>) =
 
     let execute clientId command : Async<unit> =
         let stream = resolve clientId
         stream.Transact(interpret command)
-    let handle clientId command : Aync<Todo list> =
+    let handle clientId command : Async<Todo list> =
         let stream = resolve clientId
         stream.Transact(fun state ->
-            let ctx = Equinox.Accumulator(fold, state)
-            ctx.Transact (interpret command)
-            ctx.State.items,ctx.Accumulated)
+            let events = interpret command state
+            let state' = fold state events
+            state'.items,events)
     let query clientId (projection : State -> 't) : Async<'t> =
         let stream = resolve clientId
         stream.Query projection
@@ -115,8 +116,9 @@ let log = LoggerConfiguration().WriteTo.Console().CreateLogger()
 let [<Literal>] appName = "equinox-tutorial"
 let cache = Equinox.Cache(appName, 20)
 
+open Equinox.Cosmos
 module Store =
-    let read key = System.Environment.GetEnvironmentVariable key |> Option.ofObj |> Option.get
+    let read key = Environment.GetEnvironmentVariable key |> Option.ofObj |> Option.get
 
     let connector = Connector(TimeSpan.FromSeconds 5., 2, TimeSpan.FromSeconds 5., log=log)
     let conn = connector.Connect(appName, Discovery.FromConnectionString (read "EQUINOX_COSMOS_CONNECTION")) |> Async.RunSynchronously
@@ -127,9 +129,10 @@ module Store =
 
 module TodosCategory = 
     let access = AccessStrategy.Snapshot (isOrigin,snapshot)
-    let resolve = Resolver(Store.store, codec, fold, initial, Store.cacheStrategy, access=access).Resolve
+    let resolver = Resolver(Store.store, codec, fold, initial, Store.cacheStrategy, access=access)
+    let resolve id = Equinox.Stream(log, resolver.Resolve(streamName id), maxAttempts = 3)
 
-let service = Service(log, TodosCategory.resolve)
+let service = Service(TodosCategory.resolve)
 
 let client = "ClientJ"
 let item = { id = 0; order = 0; title = "Feed cat"; completed = false }
