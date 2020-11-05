@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <Compile Include="..\Equinox.Core\Infrastructure.fs" Link="Infrastructure.fs" />
-    <Compile Include="DynamoDb.fs" />
+    <Compile Include="DynamoStore.fs" />
   </ItemGroup>
 
   <ItemGroup>

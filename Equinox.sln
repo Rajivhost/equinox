@@ -16,13 +16,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".project", ".project", "{7E
 		CONTRIBUTING.md = CONTRIBUTING.md
 		Directory.Build.props = Directory.Build.props
 		Directory.Build.targets = Directory.Build.targets
+		docker-compose.yml = docker-compose.yml
 		DOCUMENTATION.md = DOCUMENTATION.md
+		global.json = global.json
 		LICENSE = LICENSE
+		nuget.config = nuget.config
 		README.md = README.md
 		SECURITY.md = SECURITY.md
-		docker-compose.yml = docker-compose.yml
-		global.json = global.json
-		nuget.config = nuget.config
 	EndProjectSection
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Domain", "samples\Store\Domain\Domain.fsproj", "{37B4A45F-039E-4515-8A84-D242DDE12D22}"
@@ -61,10 +61,6 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Tutorial", "samples\Tutoria
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.Tools.TestHarness", "tools\Equinox.Tools.TestHarness\Equinox.Tools.TestHarness.fsproj", "{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}"
 EndProject
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoDb", "src\Equinox.DynamoDb\Equinox.DynamoDb.fsproj", "{CEC07BE7-AF6D-476B-8695-A39C49E1015C}"
-EndProject
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoDb.Integration", "tests\Equinox.DynamoDb.Integration\Equinox.DynamoDb.Integration.fsproj", "{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}"
-EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.SqlStreamStore", "src\Equinox.SqlStreamStore\Equinox.SqlStreamStore.fsproj", "{A2ABD57E-0C40-4E29-8EA2-9FB21DBD4029}"
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.SqlStreamStore.MsSql", "src\Equinox.SqlStreamStore.MsSql\Equinox.SqlStreamStore.MsSql.fsproj", "{11B0C20E-EE3E-44E6-9BCC-F2299AE216A2}"
@@ -79,20 +75,24 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.SqlStreamStore.MySq
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.SqlStreamStore.Postgres.Integration", "tests\Equinox.SqlStreamStore.Postgres.Integration\Equinox.SqlStreamStore.Postgres.Integration.fsproj", "{CDA2F063-B089-4452-8421-82A4EC57B13B}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Equinox.Core", "src\Equinox.Core\Equinox.Core.fsproj", "{3021659A-5CA4-4E06-AF00-2457ED3F105B}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.Core", "src\Equinox.Core\Equinox.Core.fsproj", "{3021659A-5CA4-4E06-AF00-2457ED3F105B}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "diagrams", "diagrams", "{596FFDD5-8B3C-4D5E-865A-962AFBB210FF}"
-ProjectSection(SolutionItems) = preProject
-	diagrams\MemoryStore.puml = diagrams\MemoryStore.puml
-	diagrams\context.puml = diagrams\context.puml
-	diagrams\container.puml = diagrams\container.puml
-	diagrams\MemoryStoreContainer.puml = diagrams\MemoryStoreContainer.puml
-	diagrams\EventStoreCode.puml = diagrams\EventStoreCode.puml
-	diagrams\EventStore.puml = diagrams\EventStore.puml
-	diagrams\CosmosContainer.puml = diagrams\CosmosContainer.puml
-	diagrams\CosmosComponent.puml = diagrams\CosmosComponent.puml
-	diagrams\CosmosCode.puml = diagrams\CosmosCode.puml
-EndProjectSection
+	ProjectSection(SolutionItems) = preProject
+		diagrams\container.puml = diagrams\container.puml
+		diagrams\context.puml = diagrams\context.puml
+		diagrams\CosmosCode.puml = diagrams\CosmosCode.puml
+		diagrams\CosmosComponent.puml = diagrams\CosmosComponent.puml
+		diagrams\CosmosContainer.puml = diagrams\CosmosContainer.puml
+		diagrams\EventStore.puml = diagrams\EventStore.puml
+		diagrams\EventStoreCode.puml = diagrams\EventStoreCode.puml
+		diagrams\MemoryStore.puml = diagrams\MemoryStore.puml
+		diagrams\MemoryStoreContainer.puml = diagrams\MemoryStoreContainer.puml
+	EndProjectSection
+EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoStore", "src\Equinox.DynamoStore\Equinox.DynamoStore.fsproj", "{A51FE522-535B-4A6D-A34D-5025B4DF9A08}"
+EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Equinox.DynamoStore.Integration", "tests\Equinox.DynamoStore.Integration\Equinox.DynamoStore.Integration.fsproj", "{73F74AE5-895B-4BB3-A829-C564AC7E0FA2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -168,16 +168,6 @@ Global
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C2EE7D8E-6982-41AD-ADCC-E6F586E93524}.Release|Any CPU.Build.0 = Release|Any CPU
-<<<<<<< HEAD
-		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CEC07BE7-AF6D-476B-8695-A39C49E1015C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{82C40B2A-27B3-41E8-A729-93D1BC6FD16E}.Release|Any CPU.Build.0 = Release|Any CPU
-=======
 		{A2ABD57E-0C40-4E29-8EA2-9FB21DBD4029}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A2ABD57E-0C40-4E29-8EA2-9FB21DBD4029}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A2ABD57E-0C40-4E29-8EA2-9FB21DBD4029}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -210,7 +200,14 @@ Global
 		{3021659A-5CA4-4E06-AF00-2457ED3F105B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3021659A-5CA4-4E06-AF00-2457ED3F105B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3021659A-5CA4-4E06-AF00-2457ED3F105B}.Release|Any CPU.Build.0 = Release|Any CPU
->>>>>>> master
+		{A51FE522-535B-4A6D-A34D-5025B4DF9A08}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A51FE522-535B-4A6D-A34D-5025B4DF9A08}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A51FE522-535B-4A6D-A34D-5025B4DF9A08}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A51FE522-535B-4A6D-A34D-5025B4DF9A08}.Release|Any CPU.Build.0 = Release|Any CPU
+		{73F74AE5-895B-4BB3-A829-C564AC7E0FA2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{73F74AE5-895B-4BB3-A829-C564AC7E0FA2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{73F74AE5-895B-4BB3-A829-C564AC7E0FA2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{73F74AE5-895B-4BB3-A829-C564AC7E0FA2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

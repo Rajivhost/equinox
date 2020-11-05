@@ -1,4 +1,4 @@
-﻿namespace Equinox.DynamoDb.Store
+﻿namespace Equinox.DynamoStore
 
 open System
 open Amazon
@@ -22,8 +22,8 @@ type EventStream =
         StreamId : string
         [<RangeKey>]
         Version: int64
-        CreatedAt : DateTimeOffset
         Events: EventData[]
+        Timestamp : int
     }
 
 [<RequireQualifiedAccess>]
@@ -161,19 +161,22 @@ module private Write =
     let private writeEventsAsync (log : ILogger) (conn : TableContext<EventStream>) (streamName : string) (version : int64) (events : EventData[])
         : Async<EsSyncResult> = async {
         try
-            let stream = {
-                    EventStream.StreamId = streamName
-                    Version = version
-                    CreatedAt = DateTimeOffset.UtcNow
-                    Events = events
-                }
+            match! TableKey.Range(streamName, version) |> conn.ContainsKeyAsync with
+            | true ->
+                log.Information("Es TrySync WrongExpectedVersionException writing {EventTypes}, actual {ActualVersion}", [| for x in events -> x.Type |], version)
+                return EsSyncResult.Conflict -1L
+            | false ->
+                let stream = {
+                        EventStream.StreamId = streamName
+                        Version = version
+                        Events = events
+                        Timestamp = (DateTime.Now.Subtract(new DateTime(1970,1,1)).TotalSeconds |> int)
+                    }
 
-            let! key = conn.PutItemAsync(stream)
-            return EsSyncResult.Written key
-        //with :? EventStore.ClientAPI.Exceptions.WrongExpectedVersionException as ex ->
-        //    log.Information(ex, "Ges TrySync WrongExpectedVersionException writing {EventTypes}, actual {ActualVersion}",
-        //        [| for x in events -> x.Type |], ex.ActualVersion)
-          with ex ->
+                let! key = conn.PutItemAsync(stream)
+                return EsSyncResult.Written key
+        with ex ->
+            log.Error(ex, ex.Message)
             return EsSyncResult.Conflict -1L }
 
     let eventDataBytes events =
@@ -194,7 +197,7 @@ module private Write =
                 log |> Log.prop "actualVersion" actualVersion, Log.WriteConflict m
             | EsSyncResult.Written x, m ->
                 log |> Log.prop "tableKey" x, Log.WriteSuccess m
-        (resultLog |> Log.event evt).Information("Ges{action:l} count={count} conflict={conflict}",
+        (resultLog |> Log.event evt).Information("Es{action:l} count={count} conflict={conflict}",
             "Write", events.Length, match evt with Log.WriteConflict _ -> true | _ -> false)
         return result }
 
