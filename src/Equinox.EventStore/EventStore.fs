@@ -210,7 +210,7 @@ module private Read =
             let! slice = readSlice pos batchLog
             match slice.Status with
             | SliceReadStatus.StreamDeleted -> raise <| EventStore.ClientAPI.Exceptions.StreamDeletedException(slice.Stream)
-            | SliceReadStatus.StreamNotFound -> yield Some (int64 ExpectedVersion.EmptyStream), Array.empty // EmptyStream must = -1
+            | SliceReadStatus.StreamNotFound -> yield Some (int64 ExpectedVersion.NoStream), Array.empty // NoStream must = -1
             | SliceReadStatus.Success ->
                 let version = if batchCount = 0 then Some slice.LastEventNumber else None
                 yield version, slice.Events
@@ -536,6 +536,19 @@ module Caching =
         let addOrUpdateSlidingExpirationCacheEntry streamName value = cache.UpdateIfNewer(prefix + streamName, options, mkCacheEntry value)
         CategoryTee<'event, 'state, 'context>(category, addOrUpdateSlidingExpirationCacheEntry) :> _
 
+    let applyCacheUpdatesWithFixedTimeSpan
+            (cache : ICache)
+            (prefix : string)
+            (period : TimeSpan)
+            (category : ICategory<'event, 'state, string, 'context>)
+            : ICategory<'event, 'state, string, 'context> =
+        let mkCacheEntry (initialToken : StreamToken, initialState : 'state) = CacheEntry<'state>(initialToken, initialState, Token.supersedes)
+        let addOrUpdateFixedLifetimeCacheEntry streamName value =
+            let expirationPoint = let creationDate = DateTimeOffset.UtcNow in creationDate.Add period
+            let options = CacheItemOptions.AbsoluteExpiration expirationPoint
+            cache.UpdateIfNewer(prefix + streamName, options, mkCacheEntry value)
+        CategoryTee<'event, 'state, 'context>(category, addOrUpdateFixedLifetimeCacheEntry) :> _
+
 type private Folder<'event, 'state, 'context>(category : Category<'event, 'state, 'context>, fold: 'state -> 'event seq -> 'state, initial: 'state, ?readCache) =
     let batched log streamName = category.Load fold initial streamName log
     interface ICategory<'event, 'state, string, 'context> with
@@ -554,10 +567,21 @@ type private Folder<'event, 'state, 'context>(category : Category<'event, 'state
             | SyncResult.Conflict resync ->         return SyncResult.Conflict resync
             | SyncResult.Written (token',state') -> return SyncResult.Written (token',state') }
 
+/// For EventStoreDB, caching is less critical than it is for e.g. CosmosDB
+/// As such, it can often be omitted, particularly if streams are short or there are snapshots being maintained
 [<NoComparison; NoEquality; RequireQualifiedAccess>]
 type CachingStrategy =
+    /// Retain a single 'state per streamName.
+    /// Each cache hit for a stream renews the retention period for the defined <c>window</c>.
+    /// Upon expiration of the defined <c>window</c> from the point at which the cache was entry was last used, a full reload is triggered.
+    /// Unless <c>ResolveOption.AllowStale</c> is used, each cache hit still incurs a roundtrip to load any subsequently-added events.
     | SlidingWindow of ICache * window : TimeSpan
-    /// Prefix is used to segregate multiple folds per stream when they are stored in the cache
+    /// Retain a single 'state per streamName.
+    /// Upon expiration of the defined <c>period</c>, a full reload is triggered.
+    /// Unless <c>ResolveOption.AllowStale</c> is used, each cache hit still incurs a roundtrip to load any subsequently-added events.
+    | FixedTimeSpan of ICache * period : TimeSpan
+    /// Prefix is used to segregate multiple folds per stream when they are stored in the cache.
+    /// Semantics are identical to <c>SlidingWindow</c>.
     | SlidingWindowPrefixed of ICache * window : TimeSpan * prefix : string
 
 type Resolver<'event, 'state, 'context>
@@ -578,17 +602,20 @@ type Resolver<'event, 'state, 'context>
     let readCacheOption =
         match caching with
         | None -> None
-        | Some (CachingStrategy.SlidingWindow(cache, _)) -> Some(cache, null)
-        | Some (CachingStrategy.SlidingWindowPrefixed(cache, _, prefix)) -> Some(cache, prefix)
+        | Some (CachingStrategy.SlidingWindow (cache, _))
+        | Some (CachingStrategy.FixedTimeSpan (cache, _)) -> Some (cache, null)
+        | Some (CachingStrategy.SlidingWindowPrefixed (cache, _, prefix)) -> Some (cache, prefix)
 
     let folder = Folder<'event, 'state, 'context>(inner, fold, initial, ?readCache = readCacheOption)
 
     let category : ICategory<_, _, _, 'context> =
         match caching with
         | None -> folder :> _
-        | Some (CachingStrategy.SlidingWindow(cache, window)) ->
+        | Some (CachingStrategy.SlidingWindow (cache, window)) ->
             Caching.applyCacheUpdatesWithSlidingExpiration cache null window folder
-        | Some (CachingStrategy.SlidingWindowPrefixed(cache, window, prefix)) ->
+        | Some (CachingStrategy.FixedTimeSpan (cache, period)) ->
+            Caching.applyCacheUpdatesWithFixedTimeSpan cache null period folder
+        | Some (CachingStrategy.SlidingWindowPrefixed (cache, window, prefix)) ->
             Caching.applyCacheUpdatesWithSlidingExpiration cache prefix window folder
 
     let resolveStream = Stream.create category
@@ -641,7 +668,7 @@ type Discovery =
     // Allow Uri-based connection definition (discovery://, tcp:// or
     | Uri of Uri
     /// Supply a set of pre-resolved EndPoints instead of letting Gossip resolution derive from the DNS outcome
-    | GossipSeeded of seedManagerEndpoints : System.Net.IPEndPoint []
+    | GossipSeeded of seedManagerEndpoints : System.Net.EndPoint []
     // Standard Gossip-based discovery based on Dns query and standard manager port
     | GossipDns of clusterDns : string
     // Standard Gossip-based discovery based on Dns query (with manager port overriding default 30778)
@@ -650,19 +677,19 @@ type Discovery =
 module private Discovery =
     let buildDns np (f : DnsClusterSettingsBuilder -> DnsClusterSettingsBuilder) =
         ClusterSettings.Create().DiscoverClusterViaDns().KeepDiscovering()
-        |> fun s -> match np with NodePreference.Random -> s.PreferRandomNode() | NodePreference.PreferSlave -> s.PreferSlaveNode() | _ -> s
+        |> fun s -> match np with NodePreference.Random -> s.PreferRandomNode() | NodePreference.PreferSlave -> s.PreferFollowerNode() | _ -> s
         |> f |> fun s -> s.Build()
 
     let buildSeeded np (f : GossipSeedClusterSettingsBuilder -> GossipSeedClusterSettingsBuilder) =
         ClusterSettings.Create().DiscoverClusterViaGossipSeeds().KeepDiscovering()
-        |> fun s -> match np with NodePreference.Random -> s.PreferRandomNode() | NodePreference.PreferSlave -> s.PreferSlaveNode() | _ -> s
+        |> fun s -> match np with NodePreference.Random -> s.PreferRandomNode() | NodePreference.PreferSlave -> s.PreferFollowerNode() | _ -> s
         |> f |> fun s -> s.Build()
 
     let configureDns clusterDns maybeManagerPort (x : DnsClusterSettingsBuilder) =
         x.SetClusterDns(clusterDns)
         |> fun s -> match maybeManagerPort with Some port -> s.SetClusterGossipPort(port) | None -> s
 
-    let inline configureSeeded (seedEndpoints : System.Net.IPEndPoint []) (x : GossipSeedClusterSettingsBuilder) =
+    let inline configureSeeded (seedEndpoints : System.Net.EndPoint []) (x : GossipSeedClusterSettingsBuilder) =
         x.SetGossipSeedEndPoints(seedEndpoints)
 
     // converts a Discovery mode to a ClusterSettings or a Uri as appropriate
@@ -697,11 +724,11 @@ type Connector
         .LimitRetriesForOperationTo(reqRetries) // ES default: 10
         |> fun s ->
             match node with
-            | NodePreference.Master         -> s.PerformOnMasterOnly()                  // explicitly use ES default of requiring master, use default Node preference of Master
+            | NodePreference.Master         -> s.PerformOnLeaderOnly()                  // explicitly use ES default of requiring master, use default Node preference of Master
             | NodePreference.PreferMaster   -> s.PerformOnAnyNode()                     // override default [implied] PerformOnMasterOnly(), use default Node preference of Master
-            // NB .PreferSlaveNode/.PreferRandomNode setting is ignored if using EventStoreConneciton.Create(ConnectionSettings, ClusterSettings) overload but
+            // NB .PreferSlaveNode/.PreferRandomNode setting is ignored if using EventStoreConnection.Create(ConnectionSettings, ClusterSettings) overload but
             // this code is necessary for cases where people are using the discover :// and related URI schemes
-            | NodePreference.PreferSlave    -> s.PerformOnAnyNode().PreferSlaveNode()   // override default PerformOnMasterOnly(), override Master Node preference
+            | NodePreference.PreferSlave    -> s.PerformOnAnyNode().PreferFollowerNode()// override default PerformOnMasterOnly(), override Master Node preference
             | NodePreference.Random         -> s.PerformOnAnyNode().PreferRandomNode()  // override default PerformOnMasterOnly(), override Master Node preference
         |> fun s -> match concurrentOperationsLimit with Some col -> s.LimitConcurrentOperationsTo(col) | None -> s // ES default: 5000
         |> fun s -> match heartbeatTimeout with Some v -> s.SetHeartbeatTimeout v | None -> s // default: 1500 ms
@@ -742,7 +769,7 @@ type Connector
         match strategy with
         | ConnectionStrategy.ClusterSingle nodePreference ->
             let! conn = __.Connect(name, discovery, nodePreference)
-            return Connection(conn, ?readRetryPolicy=readRetryPolicy, ?writeRetryPolicy=writeRetryPolicy)
+            return Connection(conn, ?readRetryPolicy = readRetryPolicy, ?writeRetryPolicy = writeRetryPolicy)
         | ConnectionStrategy.ClusterTwinPreferSlaveReads ->
             let! masterInParallel = Async.StartChild (__.Connect(name + "-TwinW", discovery, NodePreference.Master))
             let! slave = __.Connect(name + "-TwinR", discovery, NodePreference.PreferSlave)

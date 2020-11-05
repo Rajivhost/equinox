@@ -164,23 +164,23 @@ slightly differently:
 
 ![Equinox.EventStore/SqlStreamStore c4model.com Code - another process; using snapshotting](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/EventStoreCode.puml&idx=3&fmt=svg)
 
-# Equinox.Cosmos
+# Equinox.CosmosStore
 
-## Container Diagram for `Equinox.Cosmos`
+## Container Diagram for `Equinox.CosmosStore`
 
-![Equinox.Cosmos c4model.com Container Diagram](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosContainer.puml?fmt=svg)
+![Equinox.CosmosStore c4model.com Container Diagram](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosContainer.puml?fmt=svg)
 
-## Component Diagram for `Equinox.Cosmos`
+## Component Diagram for `Equinox.CosmosStore`
 
-![Equinox.Cosmos c4model.com Component Diagram](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosComponent.puml?fmt=svg)
+![Equinox.CosmosStore c4model.com Component Diagram](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosComponent.puml?fmt=svg)
 
-## Code Diagrams for `Equinox.Cosmos`
+## Code Diagrams for `Equinox.CosmosStore`
 
 This diagram walks through the basic sequence of operations, where:
 - this node has not yet read this stream (i.e. there's nothing in the Cache)
 - when we do read it, the Read call returns `404` (with a charge of `1 RU`)
 
-![Equinox.Cosmos c4model.com Code - first Time](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=0&fmt=svg)
+![Equinox.CosmosStore c4model.com Code - first Time](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=0&fmt=svg)
 
 Next, we extend the scenario to show:
 - how state held in the Cache influences the Cosmos APIs used
@@ -194,12 +194,12 @@ Next, we extend the scenario to show:
   - when there's conflict and we're giving up (throw
     `MaxAttemptsExceededException`)
 
-![Equinox.Cosmos c4model.com Code - with cache, snapshotting](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=1&fmt=svg)
+![Equinox.CosmosStore c4model.com Code - with cache, snapshotting](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=1&fmt=svg)
 
 After the write, we circle back to illustrate the effect of the caching when we
 have correct state (we get a `304 Not Mofified` and pay only `1 RU`)
 
-![Equinox.Cosmos c4model.com Code - next time; same process, i.e. cached](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=2&fmt=svg)
+![Equinox.CosmosStore c4model.com Code - next time; same process, i.e. cached](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=2&fmt=svg)
 
 In other processes (when a cache is not fully in sync), the sequence runs
 slightly differently:
@@ -208,7 +208,7 @@ slightly differently:
   suitable snapshot that passes the `isOrigin` predicate is found within the
   _Tip_
 
-![Equinox.Cosmos c4model.com Code - another process; using snapshotting](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=3&fmt=svg)
+![Equinox.CosmosStore c4model.com Code - another process; using snapshotting](http://www.plantuml.com/plantuml/proxy?cache=no&src=https://raw.github.com/jet/equinox/master/diagrams/CosmosCode.puml&idx=3&fmt=svg)
 
 # Glossary
 
@@ -246,13 +246,13 @@ Store                                                      | Holds Events for a 
 Stream                                                     | Ordered sequence of Events in a Store
 Synchronous Query                                          | Consistent read direct from Stream State (breaking CQRS and coupling implementation to the State used to support the Decision process). See CQRS, Query, Reactions
 
-## CosmosDb
+## CosmosDB
 
 Term                     | Description
 -------------------------|------------
 Change Feed              | set of query patterns enabling the running of continuous queries reading Items (documents) in a Range (physical partition) in order of their last update
 Change Feed Processor    | Library from Microsoft exposing facilities to Project from a Change Feed, maintaining Offsets per Range of the Monitored Container in a Lease Container
-Container                | logical space in a CosmosDb holding [loosely] related Items (aka Documents). Items bear logical Partition Keys. Formerly Collection. Can be allocated Request Units.
+Container                | logical space in a CosmosDB holding [loosely] related Items (aka Documents). Items bear logical Partition Keys. Formerly Collection. Can be allocated Request Units.
 CosmosDB                 | Microsoft Azure's managed document database system
 Database                 | Group of Containers. Can be allocated Request Units.
 DocumentDb               | Original offering of CosmosDB, now entitled the SQL Query Model, `Microsoft.Azure.DocumentDb.Client[.Core]`
@@ -410,13 +410,13 @@ module EventStore =
 
 module Cosmos =
     let accessStrategy =
-        Equinox.Cosmos.AccessStrategy.Snapshot (Fold.isOrigin, Fold.snapshot)
+        Equinox.CosmosStore.AccessStrategy.Snapshot (Fold.isOrigin, Fold.snapshot)
     let create (context, cache) =
         let cacheStrategy =
-            Equinox.Cosmos.CachingStrategy.SlidingWindow (cache, System.TimeSpan.FromMinutes 20.)
-        let resolver =
-            Equinox.Cosmos.Resolver(context, Events.codec, Fold.fold, Fold.initial, cacheStrategy, accessStrategy)
-        create resolver.Resolve
+            Equinox.CosmosStore.CachingStrategy.SlidingWindow (cache, System.TimeSpan.FromMinutes 20.)
+        let category =
+            Equinox.CosmosStore.CosmosStoreCategory(context, Events.codec, Fold.fold, Fold.initial, cacheStrategy, accessStrategy)
+        create category.Resolve
 ```
 
 ### `MemoryStore` Storage Binding Module
@@ -485,7 +485,7 @@ events on a given category of stream:
 When using a Store with support for synchronous unfolds and/or snapshots, one
 will typically implement two further functions in order to avoid having every
 `'event` in the stream be loaded and processed in order to build the `'state`
-per Decision or Query  (versus a single cheap point read from CosmosDb to read
+per Decision or Query  (versus a single cheap point read from CosmosDB to read
 the _tip_):
 
 - `isOrigin: 'event -> bool`: predicate indicating whether a given `'event` is
@@ -519,7 +519,7 @@ When running a decision process, we have the following stages:
 
      b. if there is a conflict, obtain the conflicting events [that other
      writers have produced] since the Position used in step 1, `fold` them into
-     our `state`, and go back to 2 (aside: the CosmosDb stored procedure can
+     our `state`, and go back to 2 (aside: the CosmosDB stored procedure can
      send them back immediately at zero cost or latency, and there is [a
      proposal for EventStore to afford the same
      facility](https://github.com/EventStore/EventStore/issues/1652))
@@ -1457,7 +1457,7 @@ Key aspects relevant to the Equinox programming model:
 
 - Projections can be managed by either tailing streams (including the synthetic
   `$all` stream) or using the Projections facility - there's no obvious reason
-  to wrap it, aside from being able to uniformly target CosmosDb (i.e. one
+  to wrap it, aside from being able to uniformly target CosmosDB (i.e. one
   could build an `Equinox.EventStore.Projection` library and an `eqx project
   stats es` with very little code).
 
@@ -1478,16 +1478,16 @@ Key aspects relevant to the Equinox programming model:
   that json (presented as UTF-8 byte arrays) is a good default for reasons of
   interoperability (the projections facility also strongly implies json)
 
-### Azure CosmosDb concerns
+### Azure CosmosDB concerns
 
 TL;DR caching can optimize RU consumption significantly. Due to the intrinsic
 ability to mutate easily, the potential to integrate rolling snapshots into
 core storage is clear. Providing ways to cache and snapshot matter a lot on
-CosmosDb, as lowest-common-denominator queries loading lots of events cost in
+CosmosDB, as lowest-common-denominator queries loading lots of events cost in
 performance and cash. The specifics of how you use the changefeed matters more
-than one might thing from the CosmosDb high level docs.
+than one might thing from the CosmosDB high level docs.
 
-Overview: CosmosDb has been in production for >5 years and is a mature Document
+Overview: CosmosDB has been in production for >5 years and is a mature Document
 database. The initial DocumentDb offering is at this point a mere projected
 programming model atop a generic Document data store. Its changefeed mechanism
 affords a base upon which one can manage projections, but there is no directly
@@ -1497,7 +1497,7 @@ consumer offsets in the store itself).
 
 Key aspects relevant to the Equinox programming model:
 
-- CosmosDb has pervasive optimization feedback per call in the form of a
+- CosmosDB has pervasive optimization feedback per call in the form of a
   Request Charge attached to each and every action. Working to optimize one's
   request charges per scenario is critical both in terms of the effect it has
   on the amount of Request Units/s one you need to pre-provision (which
@@ -1510,7 +1510,7 @@ Key aspects relevant to the Equinox programming model:
   plus a price per KB and are optimal. Queries, even ones returning that same
   single document, have significant overhead and hence are to be avoided
 
-- One key mechanism CosmosDb provides to allow one to work efficiently is that
+- One key mechanism CosmosDB provides to allow one to work efficiently is that
   any point-read request where one supplies a valid `etag` is charged at 1 RU,
   regardless of the size one would be transferring in the case of a cache miss
   (the other key benefit of using this is that it avoids unnecessarily clogging
@@ -1519,12 +1519,12 @@ Key aspects relevant to the Equinox programming model:
 - Indexing things surfaces in terms of increased request charges; at scale,
   each indexing hence needs to be justified
 
-- Similarly to EventStore, the default ARS encoding CosmosDb provides, together
+- Similarly to EventStore, the default ARS encoding CosmosDB provides, together
   with interoperability concerns, means that straight json makes sense as an
   encoding form for events (UTF-8 arrays)
 
 - Collectively, the above implies (arguably counter-intuitively) that using the
-  powerful generic querying facility that CosmosDb provides should actually be
+  powerful generic querying facility that CosmosDB provides should actually be
   a last resort.
 
 - See [Cosmos Storage Model](#cosmos-storage-model) for further information on
@@ -1558,12 +1558,12 @@ not reading data redundantly, and not feeding back into the oneself (although
 having separate roundtrips obviously has implications).
 
 <a name="cosmos-storage-model"></a>
-# `Equinox.Cosmos` CosmosDB Storage Model
+# `Equinox.CosmosStore` CosmosDB Storage Model
 
-This article provides a walkthrough of how `Equinox.Cosmos` encodes, writes and
+This article provides a walkthrough of how `Equinox.CosmosStore` encodes, writes and
 reads records from a stream under its control.
 
-The code (see [source](src/Equinox.Cosmos/Cosmos.fs#L6)) contains lots of
+The code (see [source](src/Equinox.CosmosStore/CosmosStore.fs#L6)) contains lots of
 comments and is intended to be read - this just provides some background.
 
 ## Batches
@@ -1575,11 +1575,11 @@ Events are stored in immutable batches consisting of:
 - `n`extIndex: `int64` // base index ('i') position value of the next record in
   the stream - NB this _always_ corresponds to `i`+`e.length` (in the case of
   the `Tip` record, there won't actually be such a record yet)
-- `id`: `string` // same as `i` (CosmosDb forces every item (document) to have one[, and it must be a `string`])
+- `id`: `string` // same as `i` (CosmosDB forces every item (document) to have one[, and it must be a `string`])
 - `e`vents: `Event[]` // (see next section) typically there is one item in the
   array (can be many if events are small, for RU and performance/efficiency
   reasons; RU charges are per 1024 byte block)
-- `ts` // CosmosDb-intrinsic last updated date for this record (changes when
+- `ts` // CosmosDB-intrinsic last updated date for this record (changes when
   replicated etc, hence see `t` below)
 
 ## Events
@@ -1588,7 +1588,7 @@ Per `Event`, we have the following:
 
 - `c`ase - the case of this union in the Discriminated Union of Events this
   stream bears (aka Event Type)
-- `d`ata - json data (CosmosDb maintains it as actual json; you are free to
+- `d`ata - json data (CosmosDB maintains it as actual json; you are free to
   index it and/or query based on that if desired)
 - `m`etadata - carries ancillary information for an event; also json
 - `t` - creation timestamp 
@@ -1601,7 +1601,7 @@ Batch (`Tip` *isa* `Batch`), adding the following:
 
 - `id`: always `-1` so one can reference it in a point-read GET request and not
   pay the cost and latency associated with a full indexed query
-- `_etag`: CosmosDb-managed field updated per-touch (facilitates `NotModified`
+- `_etag`: CosmosDB-managed field updated per-touch (facilitates `NotModified`
   result, see below)
 - `u`: Array of _unfold_ed events based on a point-in-time _state_ (see _State,
   Snapshots, Events and Unfolds_, _Unfolded Events_  and `unfold` in the
@@ -1648,7 +1648,7 @@ basic elements
 
 - Unfolds - the term `unfold` is based on the well known 'standard' FP function
   of that name, bearing the signature `'state -> 'event seq`. **=> For
-  `Equinox.Cosmos`, one might say `unfold` yields _projection_ s as _event_ s
+  `Equinox.CosmosStore`, one might say `unfold` yields _projection_ s as _event_ s
   to _snapshot_ the _state_ as at that _position_ in the _stream_**.
 
 ## Generating and saving `unfold`ed events
@@ -1740,11 +1740,10 @@ based on the events presented.
 
 ## Sync stored procedure
 
-This covers what the most complete possible implementation of the JS Stored
+This covers the V3 implementation of the JS Stored
 Procedure (see
-[source](https://github.com/jet/equinox/blob/tip-isa-batch/src/Equinox.Cosmos/Cosmos.fs#L302))
-does when presented with a batch to be written. (NB The present implementation
-is slightly simplified; see [source](src/Equinox.Cosmos/Cosmos.fs#L303).
+[source](https://github.com/jet/equinox/blob/master/src/Equinox.CosmosStore/CosmosStore.fs#L396))
+does when presented with a batch to be written.
 
 The `sync` stored procedure takes as input, a document that is almost identical
 to the format of the _`Tip`_ batch (in fact, if the stream is found to be
@@ -1754,36 +1753,33 @@ stream). The request includes the following elements:
 - `expectedVersion`: the position the requester has based their [proposed]
   events on (no,
   [providing an `etag` to save on Request Charges is not possible in the Stored Proc](https://stackoverflow.com/questions/53355886/azure-cosmosdb-stored-procedure-ifmatch-predicate))
+- the `expectedEtag` enables competing writers to
+  maintain and update `u`nfold data in a consistent fashion (backing off and
+  retrying in the case of conflict, _without any events being written per state
+  change_) (See `AccessStrategy.RollingState`, `AccessStrategy.Custom`)
 - `e`: array of Events (see Event, above) to append if, and only if, the
   expectedVersion check is fulfilled
 - `u`: array of `unfold`ed events (aka snapshots) that supersede items with
   equivalent `c`ase values  
-- `maxEvents`: the maximum number of events in an individual batch prior to
-  starting a new one. For example:
+- `maxEventsInTip`: the maximum number of events permitted to be retained in the Tip (subject to that not exceeding the `maxStringifyLen` rule). For example:
 
-  - if `e` contains 2 events, the _tip_ document's `e` has 2 events and the
-    `maxEvents` is `5`, the events get appended onto the tip
-  - if the total length including the new `e`vents would exceed `maxEvents`,
-    the Tip is 'renamed' (gets its `id` set to `i.toString()`) to become a
-    batch, and the new events go into the new Tip-Batch, the _tip_ gets frozen
-    as a `Batch`, and the new request becomes the _tip_ (as an atomic
+  - if `e` contains 2 events, the _tip_ document's `e` has 2 events and the `maxEventsInTip` is `5`, the events get appended onto the tip's `e`vents
+  - if the total length including the new `e`vents would exceed `maxEventsInTip`, the Tip is 'renamed' (gets its `id` set to `i.toString()`) to become a
+    batch (with the new `e`vents included in that calved Batch), and the new Tip has a zero-length `e`vents array
+    as a `Batch`, and a set of `u`nfolds (as an atomic
     transaction on the server side)
-
+- `maxStringifyLen`: secondary constraint on the events retained in the tip (in addition to `maxEventsInTip` constraint) - constrains the maximum length of the events being buffered in the Tip by applying a size limit in characters (as computed via `JSON.stringify(events).length`)
 - (PROPOSAL/FUTURE) `thirdPartyUnfoldRetention`: how many events to keep before
   the base (`i`) of the batch if required by lagging `u`nfolds which would
   otherwise fall out of scope as a result of the appends in this batch (this
   will default to `0`, so for example if a writer says maxEvents `10` and there
   is an `u`nfold based on an event more than `10` old it will be removed as
   part of the appending process)
-- (PROPOSAL/FUTURE): adding an `expectedEtag` would enable competing writers to
-  maintain and update `u`nfold data in a consistent fashion (backing off and
-  retrying in the case of conflict, _without any events being written per state
-  change_)
 
-## Equinox.Cosmos.Core.Events
+## Equinox.CosmosStore.Core.Events
 
-The `Equinox.Cosmos.Core` namespace provides a lower level API that can be used
-to manipulate events stored within a Azure CosmosDb using optimized native
+The `Equinox.CosmosStore.Core` namespace provides a lower level API that can be used
+to manipulate events stored within a Azure CosmosDB using optimized native
 access patterns.
 
 The higher level APIs (i.e. not `Core`), as demonstrated by the `dotnet new`
@@ -1807,7 +1803,7 @@ following key benefits:
 
 ```fsharp
 
-open Equinox.Cosmos.Core
+open Equinox.CosmosStore.Core
 // open MyCodecs.Json // example of using specific codec which can yield UTF-8
                       // byte arrays from a type using `Json.toBytes` via Fleece
                       // or similar
@@ -1816,9 +1812,9 @@ type EventData with
     static member FromT eventType value =
         EventData.FromUtf8Bytes(eventType, Json.toBytes value)
 
-// Load connection sring from your Key Vault (example here is the CosmosDb
+// Load connection sring from your Key Vault (example here is the CosmosDB
 // simulator's well known key)
-let connectionString: string =
+let connectionString : string =
     "AccountEndpoint=https://localhost:8081;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==;"
 
 // Forward to Log (you can use `Log.Logger` and/or `Log.ForContext` if your app
@@ -1829,22 +1825,21 @@ let outputLog = LoggerConfiguration().WriteTo.NLog().CreateLogger()
 let gatewayLog =
     outputLog.ForContext(Serilog.Core.Constants.SourceContextPropertyName, "Equinox")
 
-// When starting the app, we connect (once)
-let connector : Equinox.Cosmos.Connector =
-    Connector(
+let factory : Equinox.CosmosStore.CosmosStoreClientFactory =
+    CosmosStoreClientFactory(
         requestTimeout = TimeSpan.FromSeconds 5.,
-        maxRetryAttemptsOnThrottledRequests = 1,
-        maxRetryWaitTimeInSeconds = 3,
-        log = gatewayLog)
-let cnx =
-    connector.Connect("Application.CommandProcessor", Discovery.FromConnectionString connectionString)
+        maxRetryAttemptsOnRateLimitedRequests = 1,
+        maxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds 3.)
+let client =
+    factory.Create("Application.CommandProcessor", Discovery.FromConnectionString connectionString)
     |> Async.RunSynchronously
 
+let client = factory.Create(Discovery.ConnectionString connectionString)
+
 // If storing in a single collection, one specifies the db and collection
-// alternately use the overload that defers the mapping until the stream one is
-// writing to becomes clear
-let containerMap = Containers("databaseName", "containerName")
-let ctx = Context(cnx, containerMap, gatewayLog)
+// alternately use the overload that defers the mapping until the stream one is writing to becomes clear
+let connection = CosmosStoreConnection(client, "databaseName", "containerName")
+let ctx = EventsContext(connection, gatewayLog)
 
 //
 // Write an event
@@ -1870,7 +1865,7 @@ An Access Strategy defines any optimizations regarding how one arrives at a
 State of an Aggregate based on the Events stored in a Stream in a Store.
 
 The specifics of an Access Strategy depend on what makes sense for a given
-Store, i.e. `Equinox.Cosmos` necessarily has a significantly different set of
+Store, i.e. `Equinox.CosmosStore` necessarily has a significantly different set of
 strategies than `Equinox.EventStore` (although there is an intersection).
 
 Access Strategies only affect performance; you should still be able to infer
@@ -1881,9 +1876,9 @@ NOTE: its not important to select a strategy until you've actually actually
 modelled your aggregate, see [what if I change my access
 strategy](#changing-access-strategy)
 
-## `Equinox.Cosmos.AccessStrategy`
+## `Equinox.CosmosStore.AccessStrategy`
 
-TL;DR `Equinox.Cosmos`: (see also: [the storage
+TL;DR `Equinox.CosmosStore`: (see also: [the storage
 model](cosmos-storage-model) for a deep dive, and [glossary,
 below the table](#access-strategy-glossary) for definition of terms)
 - keeps all the Events for a Stream in a single [CosmosDB _logical
@@ -2045,6 +2040,172 @@ below the table](#access-strategy-glossary) for definition of terms)
 | `RollingState` | Read `Tip` <br/> (can fall back to building from events as per `Snapshot` mode if nothing in Tip, but normally there are no events) | 1) produce `state'` <br/> 2) update `Tip` with `toSnapshot state'` <br/> 3) **no events are written** <br/> 4) Concurrency Control is based on the `_etag` of the Tip, not an expectedVersion / event count |
 | `Custom` | As per `Snapshot` or `MultiSnapshot` <br/> 1) see if any `unfold`s pass the `isOrigin` test <br/> 2) Otherwise, work backward until a _Reset Event_ or start of stream | 1) produce `state'` <br/> 2) use `transmute events state` to determine a) the `unfold`s (if any) to write b) the `events` _(if any)_ to emit <br/> 3) execute the insert and/or upsert operations, contingent on the `_etag` of the opening `state` |
 
+<a name="hot-cold"></a>
+# Stream Management Policies
+
+The stores supported by Equinox are primarily intended to house _Domain Events_ (Facts) from an event-sourced model. Such events are retained indefinitely in an immutable form. 
+
+Often, the management of _Ephemeral Events_ (that one might equivalently record on a bus, queue or a topic in systems such as Apache Kafka) involves needs that overlap significantly with those of managing Domain Events. However, there's a point at which maintaining equivalent levels of access to such data is of significantly lesser value than it is for Domain Events.
+
+In theory, it can be argued that events with an ephemeral aspect are not True Event-Sourcing Events, and as such should be considered entirely separately.
+
+In practice, for myriad reasons, stores such as EventStoreDB, CosmosDB and SqlStreamStore become candidates for and/or victims of the blurring of the divide between ephemeral events and Domain Events.
+
+For the above reasons, a key aspect of designing, maintaining and evolving an event-sourced system involves the management of the overall set of events comprising the system's state:
+- grouping events into streams in accordance with the goals of the system as a whole (i.e. how one models the system in terms of aggregates), with consideration for how well a given structure aligns with the characteristics of a given Store
+- implementing policies reflecting the relevance of a stream and/or its events over time via various mechanisms: from shifting them to lower performance storage, archiving them to a separated store that's not accessible from the current online system all the way to outright deletion
+- drawing the line with regard to ephemeral events representing state that truly does not belong alongside your Domain Events
+
+## Aggregate streams
+
+While the store's capabilities and restrictions are where the rubber meets the road in your streams/events layout, it should not be the primary driver.
+
+When considering which events should be united in a given stream-category, some key factors are:
+
+- is there an invariant that the Aggregate is seeking to uphold? (remember, the stream is the principal unit of consistency control)
+- do all the events relate to a meaningful atomic structure within your system?
+- when making decisions based on grouping the events in a given way, is the resulting state a reasonable size? (this feeds into whether it's feasible to snapshot the state)
+- is the state cohesive, or is it possible to partition the grouping even further? (think [SRP](https://en.wikipedia.org/wiki/Single-responsibility_principle) and [ISP](https://en.wikipedia.org/wiki/Interface_segregation_principle))
+- is there a natural characteristic of the aggregate that bounds the number of events that will occur over its lifetime? (e.g., "the appointments" vs splitting by day/month/year/facility)
+
+## Topic streams
+
+> _When you don't load and fold events to arrive at a state_.
+
+In some cases, a stream may not even have a meaningful state, invariant or a business process that it's supporting:
+
+- example: a stream is used to queue up commands and/or post outcomes as part of some process. In such a case, the 'state' boils down to checkpointing how far a given consumer has walked along the topic (as opposed to maintaining a rolling state derived primarily from the events that one queries, renders or uses to support a decision flow).
+
+Such topic-streams are not aggregates as such, and are not addressed as a primary use case in the Equinox [Programming Model](#programming-model).
+
+However, such topic-streams are nonetheless subject to almost identical considerations in terms of how we deal with managing the lifetime of the data.
+
+## Store-specific stream bounding / event retention considerations
+
+Across both Aggregate and Topic use cases, there are specific facilities afforded (and restrictions imposed) by the specific store you're using. For instance:
+
+- _Stream size limits - EventStoreDB_: EventStore does not impose any limitations on the maximum size or event count that a single stream can bear. This allows one to maintain a perpetual queue and/or an ordered sequence of events, with or without using a retention policy to control the trimming of expired/excess events.
+- _Stream size limits - CosmosDB_: The total size of the events and _Tip-document_ of a stream must adhere to the CosmosDB [logical partition limit](https://docs.microsoft.com/en-us/azure/cosmos-db/concepts-limits) of 20GB.
+- _Retention policies - EventStoreDB_: Streams can have retention policies defined via each stream's metadata stream. The server cluster manages the application of these rules. The scavenging process removes the events, compacting the data by rewriting chunks with deleted, extraneous or aged-out events elided.
+- _Retention policies - CosmosDB_: the [CosmosDB TTL facility](https://docs.microsoft.com/en-us/azure/cosmos-db/time-to-live) allows one to define a TTL at the document level. CosmosDB removes expired items automatically (whenever residual RU capacity allows).
+
+_NOTE: Equinox does not presently expose specific controls to allow specification of either a CosmosDB TTL or EventStoreDB stream metadata_.
+
+## Mutation, archival and pruning of Events
+
+### Considerations regarding mutation or deletion of events
+
+> _You don't rewrite events or streams in a Store, for reasons_
+
+For Domain Events in an event-sourced model, their permanence and immutability is typically considered axiomatic; readers expect to be able to cache them forever, rely on their index on a stream remaining fixed etc. Some (rare) corner cases where one might wish to deviate from such axioms in terms of Domain Events in a model include:
+
+- rewriting streams as an expedient solution to a bug etc: as with the rewriting in history in git, the first rule is: DONT. (But it's technically possible and in some cases this nuclear option can solve a problem)
+- intentionally removing data: for GDPR or CCPA reasons, you may opt to mutate or remove events as part of addressing a need to conclusively end-of-life some data (many better solutions are available...)
+
+It should be noted with regard to such requirements:
+- EventStoreDB does not present any APIs for mutation of events, though deleting events is a fully supported operation (although that can be restricted). Rewrites are typically approached by doing an offline database rebuild.
+- `Equinox.Cosmos` and `Equinox.CosmosStore` include support for pruning events (only) from the head of a stream. Obviously, there's nothing stopping you deleting or altering the Batch documents out of band via the underlying CosmosDB APIs directly (Note however that the semantics of document ordering within a logical partition means its strongly advised not to mutate any event Batch documents as this will cause their ordering to become incorrect relative to other events, invalidating a key tenet that Change Feed Processors rely on).
+
+### Growth handling strategies
+
+> _No matter what the vendor tells you, it's literally not going to scale linearly..._
+
+A more typical concern for an event-sourced model is managing what should happen when an Aggregate falls out of scope. For instance, a pick ticket entity in a warehouse is only of historical interest after a certain period of time (the customer's Order History maintains long-lived state pertaining to orders and/or associated returns etc.)
+
+With regard to such needs, here are some store-specific considerations:
+
+- EventStoreDB caches only in-use streams and events. Hosting streams that are no longer relevant is considered a completely normal use case:
+  - streams and/or regions of streams that are no longer relevant don't induce a major cost on the system
+  - each client maintains a single connection to the server cluster; there is no incremental cost in terms of the potential network or client process resource consumption related directly to the size of your dataset
+  - however, there is a non-zero cost; the overall dataset needs to be colocated and backed up as a whole (there are also internal index structures maintained alongside the event chunk files, with rebuild times directly related to the store's event count etc).
+
+- For CosmosDB, the costs and impacts of retaining events and/or streams that are no longer relevant are more direct; ways they manifest include:
+  - the billing model imposes a linear cost per GB that applies equally to all event-batch documents in your store, plus the size of the associated indexes (which strongly relate to the number of items stored). These costs are multiplied by the number of regions to which you replicate.
+  - the total size of your dataset affects the minimum number of nodes across which the data will spread. i.e. 1 TB of data will require at least 10,000 RU/s to be allocated to it regardless of traffic
+  - the more nodes you have, the more TCP connections and other related fixed resources each client instance requires
+  - the RU/s allocated to your container can only be spread _equally_ across all nodes. Thus, if you have 100GB spread over 5 nodes and allocate 10,000 RU/s to the Container, each node gets 2,000 RU/s and callers get 429s if there happen to be more than that incurred for that given node in that second (with significant latency impact as all such rate-limited clients need to back off for >= 1s for each rate-limited attempt).
+  - the cost of over-provisioning to ensure appropriate capacity for spikes in load and/or to handle hotspots (where one node happens to host a stream that's accessed disproportionately heavily relative to data on other nodes) is multiplied by the number of nodes. Example: if you have a single node with 5GB of data with 2,000 RU/s allocated and want to double the peak capacity, you simply assign it 4,000 RU/s; if you have 100GB over 5 nodes, you need to double your 5x2,000 to 5x4,000 to achieve the same effect
+  - there are significant jumps in cost for writes based on the [indexing cost](https://docs.microsoft.com/en-us/azure/cosmos-db/index-policy) as the number of items in a logical partition increases (empirically derived data; subject to change: for instance inserts of a a minimal (<100 bytes) event that initially costs ~20RU becomes > 40RU with 128 items, > 50RU with 1600 items, >60 at 2800 items and >110RU at 4900 items as snapshots or event sizes hit certain thresholds). 
+
+There are myriad approaches to resolving these forces. Let's examine the trade-offs of some relevant ones...
+
+#### Database epochs
+
+> _Perhaps we can Just leave it all behind and switch to a new blank database?_
+
+In some systems, where there's a relevant natural cycle in the domain, the answer to managing database growth may be simpler than you think. For instance:
+- you may be able to start with a blank database for each trading day for the bulk of the events your system operates on.
+- your domain may have a natural end of year business process that dictates a formal closing of accounts with selective migration of relevant summarized data to be carried forward into a successor epoch. In such instances, each closed year can be managed as a separated (effectively read-only) dataset.
+
+As a fresh epoch of data becomes the active dataset, other options open up:
+- one might migrate the now-of-secondary-importance data to cheaper hardware or network resources
+- one might archive the database once you've validated the transition has been effected completely
+
+#### Stream epochs
+
+> _Replace a perpetual stream with a series of finite epoch-streams, allowing superseded ones to be archived or deleted_
+
+As covered above, long streams bring associated costs. A key one that hasn't been mentioned is that, because the unit of storage is a stream, there's no easy way to distinguish historic events from current ones. This has various effects on processing costs such as (for Aggregate streams), that of loading and folding the state (or generating a snapshot).
+
+Analogous to how data can be retired (as described in _Database epochs_), it may be possible to manage the growth cycle of continuous streams by having readers and writers coordinate the state of given stream cooperatively via the following elements:
+- one _Series_ aggregate: maintains the current active _epoch id_ for the series
+- many _Epoch_ streams: independent streams (sharing a root name), sufficed by the _epoch id_
+- having a deterministic way of coordinating to ensure each (independent) writer will recognize that a given epoch is _closed_ (e.g., based on event count, elapsed time since the epoch started, total event payload bytes, etc.)
+
+Depending on whether there's state associated with a given stream, the system periodically transitions the Series to a new Epoch by algorithms with mechanisms such as:
+- Topic-stream: write a `Closed` event; have all writes be contingent on no such event preceding any write to an epoch-stream
+- Aggregate stream:
+  1. write a `Closed` event to the outgoing epoch-stream, followed by (as a separate action with idempotent semantics) ...
+  2. write a `CarriedForward` event to open the new Epoch (again, all writers follow the same rules in order to be able to make writes idempotent even in the face of concurrent writers)
+  
+The writing of the event to move the active Epoch id forward in the _Series_ aggregate can take place at any point after the `Closed` event has been written to the outgoing epoch-stream (including concurrently with the writing of the `CarriedForward` event). The reason for this is that the active epoch can be inferred by walking forward from any given epoch until one arrives at an epoch that's not Closed.
+
+[WIP implementation of a `dotnet new` template illustrating the Stream Epochs approach](https://github.com/jet/dotnet-templates/pull/40)
+
+#### Monitoring a primary dataset for Archival/Pruning
+
+> _Move or delete out-of-scope data from a primary (hot) dataset to a cheaper (warm/cold) stream_
+
+As with 'Database epochs', once a given 'Stream epoch' has been marked active in a Series, we gain options as to what to do with the preceding ones:
+- we may opt to retain them in order to enable replaying of projections for currently-unknown reasons
+- if we intend to retain them for a significant period: we can replicate/sync/mirror/archive them to a secondary archive, then prune them from the primary dataset
+- if they are only relevant to assist troubleshooting over some short term: we can delete them after a given period (without copying them anywhere)
+
+When writing to a secondary store, there's also an opportunity to vary the writing process from that forced by the constraints imposed when writing as part of normal online transaction processing:
+- it will often make sense to have the archiver add a minimal placeholder to the secondary store regardless of whether a given stream is being archived, which can then be used to drive the walk of the primary instead of placing avoidable load on the primary by having to continually loop over all the data in order to re-assess archival criteria over time
+- when copying from primary to secondary, there's an opportunity to optimally pack events into batches (for instance in `Equinox.CosmosStore`, batching writes means less documents, which reduces document count, per-document overhead, the overall data and index size in the container and hence query costs)
+- when writing to warm secondary storage, it may make sense to compress the events (under normal circumstances, compressing event data is rarely considered a worthwhile tradeoff).
+- where the nature of traffic on the system has peaks and troughs, there's an opportunity to shift the process of traversing the data for archival purposes to a window outside of the peak load period (although, in general, the impact of reads for the purposes of archival won't be significant enough to warrant optimizing this factor)
+
+### Archiver + Pruner roles
+
+> _Outlining the roles of the `proArchiver` and `proPruner` templates_
+
+It's conceivable that one might establish a single service combining the activities of:
+1. copying (archiving) to the secondary store in reaction to changes in the primary
+2. pruning from the primary when the copying is complete
+3. deleting immediately
+4. continually visiting all streams in the primary in order to archive and/or prune streams that have fallen out of use
+
+However, splitting the work into two distinct facilities allows better delineation of responsibilities:
+- clarifies the relative responsibilities (and allows them to be considered individually)
+- allows the load (deletes can be costly in RU terms on CosmosDB) on the primary dataset to be more closely controlled
+
+#### Archiver
+
+An archiver tails a monitored store and bears the following responsibilities:
+- minimizing the load on the source it's monitoring
+- listens to all event writes (via `$all` in the case of EventStoreDB or a ChangeFeed Processor in the case of CosmosDB)
+- ensuring the secondary becomes aware of all new streams (especially in the case of `Equinox.CosmosStore` streams in `AccessStrategy.RollingState` mode, which do not yield a new event-batch per write)
+
+#### Pruner
+
+The pruner cyclically (i.e., when it reaches the end, it loops back to the start) walks the secondary store:
+- visiting each stream, identifying the current write position in the secondary
+- uses that as input into a decision as to whether / how many events can be trimmed from the primary (deletion does not need to take place right away - Equinox will deal with events spread over a Primary/Secondary pair of Containers via the [Fallback mechanism](https://github.com/jet/equinox/pull/247)
+- (for `Equinox.CosmosStore`) can optimize the packing of the events (e.g. if the most recent 4 events have arrived as 2 batches, the pruner can merge the two batches to minimize storage and index size). When writing to a primary collection, batches are never mutated for packing purposes both due to write costs and read amplification.
+- (for `Equinox.CosmosStore`) can opt to delete from the primary if one or more full Batches have been copied to the secondary (note the unit of deletion is a Batch - mutating a Batch in order to remove an event would trigger a reordering of the document's position in the logical partition)
+
 # Ideas
 
 ## Things that are incomplete and/or require work
@@ -2073,32 +2234,27 @@ EventStore, and it's Store adapter is the most proven and is pretty feature
 rich relative to the need of consumers to date. Some things remain though:
 
 - Provide a low level walking events in F# API akin to
-  `Equinox.Cosmos.Core.Events`; this would allow consumers to jump from direct
+  `Equinox.CosmosStore.Core.Events`; this would allow consumers to jump from direct
   use of `EventStore.ClientAPI` -> `Equinox.EventStore.Core.Events` ->
   `Equinox.Stream` (with the potential to swap stores once one gets to using
   `Equinox.Stream`)
-- Get conflict handling as efficient and predictable as for `Equinox.Cosmos`
+- Get conflict handling as efficient and predictable as for `Equinox.CosmosStore`
   https://github.com/jet/equinox/issues/28
 - provide for snapshots to be stored out of the stream, and loaded in a
   customizable manner in a manner analogous to
-  [the proposed comparable `Equinox.Cosmos` facility](https://github.com/jet/equinox/issues/61).
+  [the proposed comparable `Equinox.CosmosStore` facility](https://github.com/jet/equinox/issues/61).
 
-## Wouldn't it be nice - `Equinox.Cosmos`
+## Wouldn't it be nice - `Equinox.CosmosStore`
 
 - Enable snapshots to be stored outside of the main collection in
-  `Equinox.Cosmos` [#61](https://github.com/jet/equinox/issues/61)
+  `Equinox.CosmosStore` [#61](https://github.com/jet/equinox/issues/61)
 - Multiple writers support for `u`nfolds (at present a `sync` completely
   replaces the unfolds in the Tip; this will be extended by having the stored
   proc maintain the union of the unfolds in play (both for semi-related
   services and for blue/green deploy scenarios); TBD how we decide when a union
   that's no longer in use gets removed)
   [#108](https://github.com/jet/equinox/issues/108)
-- performance, efficiency and concurrency improvements based on
-  [`tip-isa-batch`](https://github.com/jet/equinox/tree/tip-isa-batch) schema
-  generalization [#109](https://github.com/jet/equinox/issues/109)
-- performance improvements in loading logic
-- Perf tuning of `JObject` vs `UTF-8` arrays and/or using a different
-  serializer [#79](https://github.com/jet/equinox/issues/79)
+- low level performance improvements in loading logic (reducing allocations etc)
 
 ## Wouldn't it be nice - `Equinox.DynamoDb`
 

@@ -1,5 +1,5 @@
 ﻿[<AutoOpen>]
-module Equinox.Cosmos.Integration.Infrastructure
+module Equinox.CosmosStore.Integration.Infrastructure
 
 open Domain
 open FsCheck
@@ -49,14 +49,15 @@ module SerilogHelpers =
     let (|SerilogScalar|_|) : Serilog.Events.LogEventPropertyValue -> obj option = function
         | (:? ScalarValue as x) -> Some x.Value
         | _ -> None
-    open Equinox.Cosmos.Store
-    open Equinox.Cosmos.Store.Log
+    open Equinox.CosmosStore.Core
+    open Equinox.CosmosStore.Core.Log
     [<RequireQualifiedAccess>]
     type EqxAct =
         | Tip | TipNotFound | TipNotModified
         | ResponseForward | ResponseBackward
         | QueryForward | QueryBackward
         | Append | Resync | Conflict
+        | PruneResponse | Delete | Trim | Prune
     let (|EqxAction|) = function
         | Event.Tip _ -> EqxAct.Tip
         | Event.TipNotFound _ -> EqxAct.TipNotFound
@@ -68,26 +69,34 @@ module SerilogHelpers =
         | Event.SyncSuccess _ -> EqxAct.Append
         | Event.SyncResync _ -> EqxAct.Resync
         | Event.SyncConflict _ -> EqxAct.Conflict
-    let inline (|Stats|) ({ ru = ru }: Equinox.Cosmos.Store.Log.Measurement) = ru
-    let (|CosmosReadRc|CosmosWriteRc|CosmosResyncRc|CosmosResponseRc|) = function
+        | Event.PruneResponse _ -> EqxAct.PruneResponse
+        | Event.Delete _ -> EqxAct.Delete
+        | Event.Trim _ -> EqxAct.Trim
+        | Event.Prune _ -> EqxAct.Prune
+    let inline (|Stats|) ({ ru = ru }: Equinox.CosmosStore.Core.Log.Measurement) = ru
+    let (|CosmosReadRc|CosmosWriteRc|CosmosResyncRc|CosmosResponseRc|CosmosDeleteRc|CosmosTrimRc|CosmosPruneRc|) = function
         | Event.Tip (Stats s)
         | Event.TipNotFound (Stats s)
         | Event.TipNotModified (Stats s)
         // slices are rolled up into batches so be sure not to double-count
+        | Event.PruneResponse (Stats s)
         | Event.Response (_,Stats s) -> CosmosResponseRc s
         | Event.Query (_,_, (Stats s)) -> CosmosReadRc s
         | Event.SyncSuccess (Stats s)
         | Event.SyncConflict (Stats s) -> CosmosWriteRc s
         | Event.SyncResync (Stats s) -> CosmosResyncRc s
+        | Event.Delete (Stats s) -> CosmosDeleteRc s
+        | Event.Trim (Stats s) -> CosmosTrimRc s
+        | Event.Prune (_, (Stats s)) -> CosmosPruneRc s
     /// Facilitates splitting between events with direct charges vs synthetic events Equinox generates to avoid double counting
     let (|CosmosRequestCharge|EquinoxChargeRollup|) = function
         | CosmosResponseRc _ ->
             EquinoxChargeRollup
-        | CosmosReadRc rc | CosmosWriteRc rc | CosmosResyncRc rc as e ->
+        | CosmosReadRc rc | CosmosWriteRc rc | CosmosResyncRc rc | CosmosDeleteRc rc | CosmosTrimRc rc | CosmosPruneRc rc as e ->
             CosmosRequestCharge (e,rc)
-    let (|EqxEvent|_|) (logEvent : LogEvent) : Equinox.Cosmos.Store.Log.Event option =
+    let (|EqxEvent|_|) (logEvent : LogEvent) : Equinox.CosmosStore.Core.Log.Event option =
         logEvent.Properties.Values |> Seq.tryPick (function
-            | SerilogScalar (:? Equinox.Cosmos.Store.Log.Event as e) -> Some e
+            | SerilogScalar (:? Equinox.CosmosStore.Core.Log.Event as e) -> Some e
             | _ -> None)
 
     let (|HasProp|_|) (name : string) (e : LogEvent) : LogEventPropertyValue option =
@@ -117,6 +126,7 @@ type TestsWithLogCapture(testOutputHelper) =
         let capture = LogCaptureBuffer()
         let logger =
             Serilog.LoggerConfiguration()
+                .MinimumLevel.Debug()
                 .WriteTo.Seq("http://localhost:5341")
                 .WriteTo.Sink(testOutput)
                 .WriteTo.Sink(capture)
